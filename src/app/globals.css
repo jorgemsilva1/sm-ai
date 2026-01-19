@@ -1,26 +1,366 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "react-big-calendar/lib/css/react-big-calendar.css";
+@import "react-big-calendar/lib/addons/dragAndDrop/styles.css";
+@import "react-day-picker/dist/style.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@custom-variant dark (&:is(.dark *));
+
+/* --- react-big-calendar theme overrides (match app design) --- */
+.sm-rbc {
+  color: var(--foreground);
+}
+
+.sm-rbc .rbc-month-view,
+.sm-rbc .rbc-time-view,
+.sm-rbc .rbc-agenda-view {
+  background: var(--card);
+  border: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.sm-rbc .rbc-header,
+.sm-rbc .rbc-time-header-content,
+.sm-rbc .rbc-time-content,
+.sm-rbc .rbc-timeslot-group,
+.sm-rbc .rbc-day-bg,
+.sm-rbc .rbc-time-slot,
+.sm-rbc .rbc-agenda-table,
+.sm-rbc .rbc-agenda-time-cell,
+.sm-rbc .rbc-agenda-date-cell,
+.sm-rbc .rbc-agenda-event-cell {
+  border-color: color-mix(in oklab, var(--border) 45%, transparent) !important;
+}
+
+.sm-rbc .rbc-header {
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
+  color: var(--muted-foreground);
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.5rem 0.75rem;
+}
+
+.sm-rbc .rbc-date-cell {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+}
+
+.sm-rbc .rbc-date-cell > a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sm-rbc .rbc-date-cell > a:hover {
+  color: var(--foreground);
+}
+
+.sm-rbc .rbc-month-row {
+  min-height: 110px;
+}
+
+.sm-rbc .rbc-time-gutter,
+.sm-rbc .rbc-time-header-gutter {
+  background: color-mix(in oklab, var(--muted) 60%, transparent);
+  color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+}
+
+.sm-rbc .rbc-label {
+  font-size: 0.75rem;
+}
+
+.sm-rbc .rbc-off-range-bg {
+  background: color-mix(in oklab, var(--muted) 35%, transparent);
+}
+
+.sm-rbc .rbc-day-bg.sm-rbc-today,
+.sm-rbc .rbc-time-column.sm-rbc-today,
+.sm-rbc .sm-rbc-today {
+  background: color-mix(in oklab, var(--brand) 10%, transparent) !important;
+}
+
+.sm-rbc .rbc-today {
+  background: color-mix(in oklab, var(--brand) 10%, transparent) !important;
+}
+
+.sm-rbc .rbc-event,
+.sm-rbc .rbc-background-event {
+  background: color-mix(in oklab, var(--brand) 18%, transparent);
+  border: 1px solid color-mix(in oklab, var(--brand) 55%, transparent);
+  color: var(--foreground);
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.2rem 0.45rem;
+  box-shadow: none;
+}
+
+.sm-rbc .rbc-event.sm-rbc-event,
+.sm-rbc .rbc-background-event.sm-rbc-event {
+  background: color-mix(in oklab, var(--brand) 20%, transparent);
+  border-color: color-mix(in oklab, var(--brand) 62%, transparent);
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-accepted,
+.sm-rbc .rbc-background-event.sm-rbc-event.sm-rbc-event-accepted {
+  border-color: var(--brand);
+  background: color-mix(in oklab, var(--brand) 26%, transparent);
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-suggested,
+.sm-rbc .rbc-background-event.sm-rbc-event.sm-rbc-event-suggested {
+  border-style: dashed;
+  opacity: 0.92;
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-instagram {
+  border-color: color-mix(in oklab, #e1306c 55%, var(--border));
+}
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-tiktok {
+  border-color: color-mix(in oklab, #00f2ea 55%, var(--border));
+}
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-facebook {
+  border-color: color-mix(in oklab, #1877f2 55%, var(--border));
+}
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-linkedin {
+  border-color: color-mix(in oklab, #0a66c2 55%, var(--border));
+}
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-youtube {
+  border-color: color-mix(in oklab, #ff0000 55%, var(--border));
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-holiday {
+  background: color-mix(in oklab, var(--muted) 65%, transparent);
+  border-color: color-mix(in oklab, var(--border) 70%, transparent);
+  color: var(--muted-foreground);
+  box-shadow: none;
+  opacity: 0.9;
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-celebration {
+  background: color-mix(in oklab, var(--accent) 45%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 75%, transparent);
+  color: var(--foreground);
+  box-shadow: none;
+  opacity: 0.92;
+}
+
+.sm-rbc .rbc-event:hover,
+.sm-rbc .rbc-background-event:hover {
+  background: color-mix(in oklab, var(--brand) 26%, transparent);
+}
+
+.sm-rbc .rbc-event-label {
+  font-size: 0.7rem;
+  color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+}
+
+.sm-rbc .rbc-event-content {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.sm-rbc .rbc-day-slot .rbc-time-slot {
+  border-top-color: color-mix(in oklab, var(--border) 35%, transparent) !important;
+}
+
+.sm-rbc .rbc-timeslot-group {
+  min-height: 48px;
+}
+
+.sm-rbc .rbc-time-slot {
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+}
+
+.sm-rbc .rbc-day-slot .rbc-events-container {
+  margin-right: 6px;
+}
+
+.sm-rbc .rbc-time-view .rbc-allday-cell {
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+
+.sm-rbc .rbc-event:focus,
+.sm-rbc .rbc-event.rbc-selected {
+  outline: 2px solid color-mix(in oklab, var(--ring) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.sm-rbc .rbc-show-more {
+  color: color-mix(in oklab, var(--brand) 75%, var(--foreground));
+  font-weight: 600;
+}
+
+.sm-rbc .rbc-current-time-indicator {
+  background-color: color-mix(in oklab, var(--brand-strong) 85%, transparent);
+}
+
+/* --- react-day-picker theme overrides (minimal, match app design) --- */
+.rdp {
+  --rdp-accent-color: var(--brand);
+  --rdp-background-color: color-mix(in oklab, var(--brand) 15%, transparent);
+  --rdp-outline: color-mix(in oklab, var(--ring) 65%, transparent);
+  --rdp-outline-selected: color-mix(in oklab, var(--ring) 65%, transparent);
+  color: var(--foreground);
+}
+
+.rdp-day_selected,
+.rdp-day_selected:focus-visible,
+.rdp-day_selected:hover {
+  background-color: var(--brand);
+  color: var(--primary-foreground);
+}
+
+.rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+  background-color: color-mix(in oklab, var(--muted) 70%, transparent);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-brand: var(--brand);
+  --color-brand-muted: var(--brand-muted);
+  --color-brand-strong: var(--brand-strong);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.985 0.006 245);
+  --foreground: oklch(0.17 0.02 255);
+  --card: oklch(0.995 0.004 245);
+  --card-foreground: oklch(0.17 0.02 255);
+  --popover: oklch(0.995 0.004 245);
+  --popover-foreground: oklch(0.17 0.02 255);
+  --primary: oklch(0.72 0.19 54);
+  --primary-foreground: oklch(0.12 0.01 240);
+  --secondary: oklch(0.95 0.01 245);
+  --secondary-foreground: oklch(0.2 0.02 255);
+  --muted: oklch(0.95 0.01 245);
+  --muted-foreground: oklch(0.48 0.02 255);
+  --accent: oklch(0.92 0.03 60);
+  --accent-foreground: oklch(0.2 0.02 255);
+  --destructive: oklch(0.62 0.22 27);
+  --border: oklch(0.9 0.01 245);
+  --input: oklch(0.9 0.01 245);
+  --ring: oklch(0.7 0.12 60);
+  --brand: oklch(0.72 0.19 54);
+  --brand-muted: oklch(0.78 0.14 58);
+  --brand-strong: oklch(0.64 0.22 50);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.98 0.01 245);
+  --sidebar-foreground: oklch(0.17 0.02 255);
+  --sidebar-primary: oklch(0.72 0.19 54);
+  --sidebar-primary-foreground: oklch(0.12 0.01 240);
+  --sidebar-accent: oklch(0.93 0.02 55);
+  --sidebar-accent-foreground: oklch(0.2 0.02 255);
+  --sidebar-border: oklch(0.9 0.01 245);
+  --sidebar-ring: oklch(0.7 0.12 60);
+}
+
+.dark {
+  --background: oklch(0.12 0.02 250);
+  --foreground: oklch(0.98 0.01 245);
+  --card: oklch(0.16 0.02 252);
+  --card-foreground: oklch(0.98 0.01 245);
+  --popover: oklch(0.16 0.02 252);
+  --popover-foreground: oklch(0.98 0.01 245);
+  --primary: oklch(0.74 0.19 55);
+  --primary-foreground: oklch(0.12 0.02 250);
+  --secondary: oklch(0.22 0.02 252);
+  --secondary-foreground: oklch(0.98 0.01 245);
+  --muted: oklch(0.22 0.02 252);
+  --muted-foreground: oklch(0.65 0.02 250);
+  --accent: oklch(0.26 0.03 55);
+  --accent-foreground: oklch(0.98 0.01 245);
+  --destructive: oklch(0.68 0.22 25);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.7 0.13 55);
+  --brand: oklch(0.74 0.19 55);
+  --brand-muted: oklch(0.7 0.13 55);
+  --brand-strong: oklch(0.62 0.22 50);
+  --chart-1: oklch(0.64 0.24 55);
+  --chart-2: oklch(0.55 0.17 200);
+  --chart-3: oklch(0.72 0.12 85);
+  --chart-4: oklch(0.63 0.2 310);
+  --chart-5: oklch(0.68 0.2 20);
+  --sidebar: oklch(0.16 0.02 252);
+  --sidebar-foreground: oklch(0.98 0.01 245);
+  --sidebar-primary: oklch(0.74 0.19 55);
+  --sidebar-primary-foreground: oklch(0.12 0.02 250);
+  --sidebar-accent: oklch(0.24 0.02 252);
+  --sidebar-accent-foreground: oklch(0.98 0.01 245);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.7 0.13 55);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer utilities {
+  .bg-tech {
+    background-image:
+      radial-gradient(1200px 600px at 20% -10%, oklch(0.74 0.19 55 / 0.15), transparent 60%),
+      radial-gradient(900px 600px at 80% -20%, oklch(0.58 0.18 30 / 0.18), transparent 60%),
+      radial-gradient(800px 500px at 50% 120%, oklch(0.35 0.05 250 / 0.5), transparent 60%);
+  }
+  .border-grid {
+    background-image: linear-gradient(
+        to right,
+        oklch(1 0 0 / 0.06) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, oklch(1 0 0 / 0.06) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
 }

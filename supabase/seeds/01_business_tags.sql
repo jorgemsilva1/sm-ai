@@ -1,0 +1,32 @@
+insert into public.business_tags (name, slug)
+values
+  ('Restauração', 'restauracao'),
+  ('Hotelaria', 'hotelaria'),
+  ('Cafés & Bares', 'cafes-e-bares'),
+  ('Retalho', 'retalho'),
+  ('E-commerce', 'ecommerce'),
+  ('Saúde', 'saude'),
+  ('Fitness', 'fitness'),
+  ('Beleza & Bem-estar', 'beleza'),
+  ('Educação', 'educacao'),
+  ('Imobiliário', 'imobiliario'),
+  ('Construção', 'construcao'),
+  ('Tecnologia', 'tecnologia'),
+  ('SaaS', 'saas'),
+  ('Turismo', 'turismo'),
+  ('Eventos', 'eventos'),
+  ('Logística', 'logistica'),
+  ('Indústria', 'industria'),
+  ('Agricultura', 'agricultura'),
+  ('Automóvel', 'automovel'),
+  ('Financeiro', 'financeiro'),
+  ('Jurídico', 'juridico'),
+  ('Consultoria', 'consultoria'),
+  ('Telecomunicações', 'telecom'),
+  ('Media & Conteúdos', 'media'),
+  ('Entretenimento', 'entretenimento'),
+  ('Organizações', 'organizacoes'),
+  ('Marketplaces', 'marketplaces'),
+  ('Segurança', 'seguranca')
+on conflict (slug)
+do update set name = excluded.name;
