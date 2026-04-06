@@ -265,8 +265,9 @@ export function ClientSettingsForm({
               defaultValue={defaultValues.notes ?? ""}
             />
           </div>
+
           <div className="md:col-span-2">
-            <SubmitButton className="bg-brand text-primary-foreground">
+            <SubmitButton variant="brand">
               {t.clients.info.submit}
             </SubmitButton>
           </div>

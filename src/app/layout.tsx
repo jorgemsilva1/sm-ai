@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { cookies } from "next/headers";
 import { getLocale } from "@/lib/i18n";
+import { ThemeProvider, type Theme } from "@/components/theme/theme-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,13 +29,20 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const locale = getLocale(cookieStore);
+  const themeCookie = cookieStore.get("theme")?.value as Theme | undefined;
+  const theme: Theme = themeCookie ?? "system";
+  // Server can't detect system preference — no class by default (light), client hydration corrects
+  const initialClass = theme === "dark" ? "dark" : "";
+
   return (
-    <html lang={locale} className="dark">
+    <html lang={locale} className={initialClass} suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-background text-foreground antialiased`}
       >
-        {children}
-        <Toaster richColors closeButton />
+        <ThemeProvider defaultTheme={theme}>
+          {children}
+          <Toaster richColors closeButton />
+        </ThemeProvider>
       </body>
     </html>
   );

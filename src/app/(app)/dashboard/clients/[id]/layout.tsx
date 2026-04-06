@@ -27,9 +27,9 @@ export default async function ClientLayout({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
-      <aside className="h-fit border border-border/40 p-4">
-        <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
+      <aside className="sticky top-24 h-fit rounded-xl border border-border/20 bg-surface-1 p-5 shadow-sm">
+        <p className="mb-5 text-sm font-semibold text-foreground/80">
           {client.name}
         </p>
         <ClientSidebarNav clientId={client.id} locale={locale} />

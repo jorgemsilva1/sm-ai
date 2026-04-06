@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClientCalendar } from "@/components/clients/client-calendar";
 import { ScheduleGeneratorModal } from "@/components/clients/client-schedule-modal";
 import { cookies } from "next/headers";
 import { copy, getLocale } from "@/lib/i18n";
 import { addDays, addMinutes } from "date-fns";
 import Holidays from "date-holidays";
+import { CalendarTabs } from "@/components/clients/calendar-tabs";
 
 type ClientCalendarPageProps = {
   params: Promise<{ id: string }>;
@@ -22,7 +24,7 @@ export default async function ClientCalendarPage({ params }: ClientCalendarPageP
 
   const withNewCols = await supabase
     .from("clients")
-    .select("id, name, photo_url, country_code, timezone, default_locale")
+    .select("id, name, photo_url, country_code, timezone, default_locale, client_type")
     .eq("id", id)
     .single();
 
@@ -35,7 +37,12 @@ export default async function ClientCalendarPage({ params }: ClientCalendarPageP
   const client =
     withNewCols.data ??
     (fallback.data
-      ? ({ ...(fallback.data as any), timezone: "Europe/Lisbon", default_locale: locale } as any)
+      ? ({ 
+          ...(fallback.data as any), 
+          timezone: "Europe/Lisbon", 
+          default_locale: locale,
+          client_type: "services",
+        } as any)
       : null);
   const error = withNewCols.error && !withNewCols.data ? withNewCols.error : fallback.error;
 
@@ -201,11 +208,27 @@ export default async function ClientCalendarPage({ params }: ClientCalendarPageP
         };
       });
 
+  // Fetch business tags for trending topics
+  const { data: tagData } = await supabase
+    .from("client_business_tags")
+    .select("business_tags(slug)")
+    .eq("client_id", client.id);
+
+  const businessTags =
+    tagData
+      ?.map((row) => (row.business_tags as { slug?: string })?.slug)
+      .filter((slug): slug is string => Boolean(slug)) ?? [];
+
+  const clientType =
+    (client as { client_type?: string }).client_type === "content_creator"
+      ? "content_creator"
+      : "services";
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">{client.name}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{client.name}</h1>
           <p className="text-sm text-muted-foreground">{t.clients.sections.calendarSubtitle}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -221,20 +244,22 @@ export default async function ClientCalendarPage({ params }: ClientCalendarPageP
         </div>
       </div>
 
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">{t.clients.sections.calendarTitle}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">{t.clients.sections.calendarBody}</p>
-        </div>
-        <ClientCalendar
-          locale={locale}
-          clientId={client.id}
-          clientName={client.name}
-          clientPhotoUrl={(client as { photo_url?: string | null }).photo_url ?? null}
-          strategies={(strategies ?? []) as any}
-          events={[...holidayEvents, ...events]}
-        />
-      </section>
+      <CalendarTabs clientType={clientType} locale={locale} businessTags={businessTags}>
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">{t.clients.sections.calendarTitle}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">{t.clients.sections.calendarBody}</p>
+          </div>
+          <ClientCalendar
+            locale={locale}
+            clientId={client.id}
+            clientName={client.name}
+            clientPhotoUrl={(client as { photo_url?: string | null }).photo_url ?? null}
+            strategies={(strategies ?? []) as any}
+            events={[...holidayEvents, ...events]}
+          />
+        </section>
+      </CalendarTabs>
     </div>
   );
 }

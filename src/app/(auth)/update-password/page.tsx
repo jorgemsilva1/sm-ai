@@ -118,7 +118,7 @@ export default function UpdatePasswordPage() {
           </div>
           <Button
             type="submit"
-            className="w-full bg-brand text-primary-foreground"
+            variant="brand" className="w-full"
             disabled={loading || !ready || !hasSession}
           >
             {loading ? t.auth.updatePasswordLoading : t.auth.updatePassword}

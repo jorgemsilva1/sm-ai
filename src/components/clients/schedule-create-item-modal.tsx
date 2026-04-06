@@ -468,7 +468,7 @@ export function ScheduleCreateItemModal({
             </Button>
             <Button
               type="button"
-              className="bg-brand text-primary-foreground gap-2"
+              variant="brand" className="gap-2"
               disabled={isPending || !strategyId || (mode === "manual" && !canSubmitManual)}
               onClick={() =>
                 startTransition(async () => {

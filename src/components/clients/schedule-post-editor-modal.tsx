@@ -833,7 +833,7 @@ export function SchedulePostEditorModal({
                   <div className="text-sm font-semibold">{locale === "pt" ? "Copy" : "Copy"}</div>
                   <Button
                     type="button"
-                    className="bg-brand text-primary-foreground gap-2"
+                    variant="brand" className="gap-2"
                     disabled={isPending}
                     onClick={() =>
                       startTransition(async () => {
@@ -883,7 +883,7 @@ export function SchedulePostEditorModal({
                     <div className="mt-4 flex flex-wrap gap-2">
                       <Button
                         type="button"
-                        className="bg-brand text-primary-foreground gap-2"
+                        variant="brand" className="gap-2"
                         disabled={isPending}
                         onClick={() =>
                           startTransition(async () => {
@@ -932,7 +932,7 @@ export function SchedulePostEditorModal({
 
                 <Button
                   type="button"
-                  className="bg-brand text-primary-foreground gap-2"
+                  variant="brand" className="gap-2"
                   disabled={isPending}
                   onClick={() =>
                     startTransition(async () => {
@@ -954,7 +954,7 @@ export function SchedulePostEditorModal({
                   <div className="text-sm font-semibold">{labels.assetsTitle}</div>
                   <Button
                     type="button"
-                    className="bg-brand text-primary-foreground gap-2"
+                    variant="brand" className="gap-2"
                     disabled={isPending}
                     onClick={() => startTransition(async () => onGenerateAssets())}
                   >

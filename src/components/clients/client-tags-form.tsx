@@ -59,7 +59,7 @@ export function ClientTagsForm({
             locale={locale}
           />
           <div>
-            <SubmitButton className="bg-brand text-primary-foreground">
+            <SubmitButton variant="brand">
               {t.clients.tagsSubmit}
             </SubmitButton>
           </div>

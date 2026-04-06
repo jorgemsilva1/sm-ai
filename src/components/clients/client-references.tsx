@@ -490,7 +490,7 @@ export function ClientReferences({
               </Select>
             </div>
             <Button
-              className="bg-brand text-primary-foreground"
+              variant="brand"
               onClick={() => setShowGroupForm((prev) => !prev)}
             >
               {t.clients.sections.referencesGroupCreate}
@@ -549,7 +549,7 @@ export function ClientReferences({
                 <Input id="group-description" name="description" />
               </div>
               <div className="md:col-span-2">
-                <SubmitButton className="bg-brand text-primary-foreground">
+                <SubmitButton variant="brand">
                   {t.clients.sections.referencesActions.createGroup}
                 </SubmitButton>
               </div>
@@ -691,7 +691,7 @@ export function ClientReferences({
                   <Textarea id="item-notes" name="notes" rows={2} />
                 </div>
                 <div className="md:col-span-2">
-                  <SubmitButton className="bg-brand text-primary-foreground">
+                  <SubmitButton variant="brand">
                     {t.clients.sections.referencesActions.saveItem}
                   </SubmitButton>
                 </div>
@@ -1023,7 +1023,7 @@ export function ClientReferences({
                     placeholder={t.clients.sections.referencesCommentPlaceholder}
                     required
                   />
-                  <SubmitButton className="bg-brand text-primary-foreground">
+                  <SubmitButton variant="brand">
                     {t.clients.sections.referencesActions.addComment}
                   </SubmitButton>
                 </form>

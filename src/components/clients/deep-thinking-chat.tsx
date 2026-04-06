@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { copy, Locale } from "@/lib/i18n";
@@ -18,26 +18,42 @@ export function DeepThinkingChat({ locale }: DeepThinkingChatProps) {
   const t = copy[locale].clients.deepChat;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [isThinking, setIsThinking] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isThinking]);
+
+  const handleSubmit = (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed) return;
+    if (!trimmed || isThinking) return;
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: trimmed },
-      {
-        role: "assistant",
-        content: t.assistantReply,
-      },
-    ]);
+    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setInput("");
+    setIsThinking(true);
+
+    setTimeout(() => {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: t.assistantReply },
+      ]);
+      setIsThinking(false);
+    }, 1200);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      handleSubmit();
+    }
   };
 
   return (
-    <div className="space-y-4">
-      <div className="min-h-[280px] rounded-md border border-border/40 bg-background/60 p-4">
+    <div className="flex h-[560px] flex-col rounded-xl border border-border/20 bg-surface-1">
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto p-4">
         {messages.length ? (
           <div className="space-y-4">
             {messages.map((message, index) => (
@@ -45,16 +61,29 @@ export function DeepThinkingChat({ locale }: DeepThinkingChatProps) {
                 key={`${message.role}-${index}`}
                 className={
                   message.role === "user"
-                    ? "ml-auto w-full max-w-2xl rounded-md border border-border/60 bg-muted/40 p-3 text-sm"
-                    : "w-full max-w-2xl rounded-md border border-border/60 bg-card/60 p-3 text-sm"
+                    ? "ml-auto max-w-[80%] rounded-xl border border-brand/20 bg-brand/10 p-3 text-sm"
+                    : "max-w-[80%] rounded-xl border border-border/20 bg-surface-2 p-3 text-sm"
                 }
               >
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {message.role === "user" ? t.you : t.assistant}
                 </p>
-                <p className="mt-2 text-sm text-foreground">{message.content}</p>
+                <p className="mt-1.5 text-sm text-foreground">{message.content}</p>
               </div>
             ))}
+            {isThinking && (
+              <div className="max-w-[80%] rounded-xl border border-border/20 bg-surface-2 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t.assistant}
+                </p>
+                <div className="mt-2 flex gap-1">
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:0ms]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -63,19 +92,25 @@ export function DeepThinkingChat({ locale }: DeepThinkingChatProps) {
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <Textarea
-          rows={3}
-          placeholder={t.placeholder}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-        />
-        <div className="flex justify-end">
-          <Button type="submit" className="bg-brand text-primary-foreground">
+      {/* Input area */}
+      <div className="border-t border-border/20 glass-strong p-4">
+        <form onSubmit={handleSubmit} className="flex items-end gap-3">
+          <Textarea
+            rows={2}
+            placeholder={t.placeholder}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleKeyDown}
+            className="flex-1 resize-none"
+          />
+          <Button type="submit" variant="brand" disabled={isThinking || !input.trim()}>
             {t.send}
           </Button>
-        </div>
-      </form>
+        </form>
+        <p className="mt-1.5 text-xs text-muted-foreground/50">
+          {locale === "pt" ? "Ctrl+Enter para enviar" : "Ctrl+Enter to send"}
+        </p>
+      </div>
     </div>
   );
 }

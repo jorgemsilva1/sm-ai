@@ -178,7 +178,7 @@ export function ClientIntegrations({
               >
                 {locale === "pt" ? "Docs de OAuth & pedidos" : "OAuth & app review docs"}
               </a>
-              <Button asChild type="button" className="bg-brand text-primary-foreground" disabled={isPending}>
+              <Button asChild type="button" variant="brand" disabled={isPending}>
                 <a href={startHref}>
                   {connected.length ? (locale === "pt" ? "Adicionar conta" : "Add account") : locale === "pt" ? "Conectar" : "Connect"}
                 </a>

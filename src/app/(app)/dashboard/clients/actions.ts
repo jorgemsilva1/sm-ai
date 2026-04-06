@@ -12,10 +12,16 @@ import {
   regenerateScheduleItemWithOpenAI,
 } from "@/lib/ai/schedule-generator";
 import { generateImageBase64 } from "@/lib/ai/image-generator";
+import { getOptimalPostingSlots, formatOptimalSlotsForPrompt, analyzeClientPostingPatterns } from "@/lib/ai/posting-times";
+import { extractCompetitorInsights } from "@/lib/ai/competitor-insights";
+import { getTrendingTopics, formatTrendingTopicsForPrompt } from "@/lib/ai/trending-topics";
+import { buildCompetitorProfileWithOpenAI, regenerateCompetitorSectionWithOpenAI, type SectionKey } from "@/lib/ai/competitor-profiler";
+import { collectCompetitorUrls, crawlManyUrls } from "@/lib/crawler/web-crawler";
 
 export type ClientActionState = {
   error?: string;
   success?: string;
+  clientId?: string;
 };
 
 type ActionLocale = "en" | "pt";
@@ -288,6 +294,7 @@ function buildStrategyForAI(
   strategy: StrategyRowForAI,
   competitors: CompetitorRowForAI[],
   referenceFolders: ReferenceGroupRowForAI[],
+  competitorInsights?: { summary: string; insights: unknown; competitorNames: string[] } | null,
 ) {
   const competitorNames = competitors.map((c) => c.name).filter(Boolean);
 
@@ -312,13 +319,17 @@ function buildStrategyForAI(
       description: g.description,
     })),
     competitor_names: competitorNames,
+    competitor_insights: competitorInsights ? {
+      summary: competitorInsights.summary,
+      insights: competitorInsights.insights as any,
+    } : undefined,
   };
 }
 
 async function fetchClientContextForAI(supabase: SupabaseServerClient, clientId: string) {
   const withNewCols = await supabase
     .from("clients")
-    .select("id, name, website, description, notes, focus_area, country_code, timezone, default_locale")
+    .select("id, name, website, description, notes, focus_area, country_code, timezone, default_locale, client_type")
     .eq("id", clientId)
     .single();
 
@@ -415,6 +426,21 @@ export async function createClient(
   const photoUrl = String(formData.get("photo_url") || "").trim();
   const notes = String(formData.get("notes") || "").trim();
   const selectedTags = getSelectedTags(formData);
+  const clientType = String(formData.get("client_type") || "services").trim() as "services" | "content_creator";
+  
+  // Type-specific metadata
+  const metadata: Record<string, unknown> = {};
+  if (clientType === "services") {
+    const businessArea = String(formData.get("business_area") || "").trim();
+    const targetAudience = String(formData.get("target_audience") || "").trim();
+    if (businessArea) metadata.business_area = businessArea;
+    if (targetAudience) metadata.target_audience = targetAudience;
+  } else if (clientType === "content_creator") {
+    const contentNiche = String(formData.get("content_niche") || "").trim();
+    const primaryPlatforms = String(formData.get("primary_platforms") || "").split(",").filter(Boolean);
+    if (contentNiche) metadata.content_niche = contentNiche;
+    if (primaryPlatforms.length) metadata.primary_platforms = primaryPlatforms;
+  }
 
   if (!name) {
     return { error: t.nameRequired };
@@ -429,16 +455,24 @@ export async function createClient(
     return { error: t.sessionExpired };
   }
 
+  const insertData: Record<string, unknown> = {
+    name,
+    website: website || null,
+    description: description || null,
+    photo_url: photoUrl || null,
+    notes: notes || null,
+    owner_id: user.id,
+    client_type: clientType,
+  };
+
+  // Only add metadata if it has content
+  if (Object.keys(metadata).length > 0) {
+    insertData.metadata = metadata;
+  }
+
   const { data, error } = await supabase
     .from("clients")
-    .insert({
-      name,
-      website: website || null,
-      description: description || null,
-      photo_url: photoUrl || null,
-      notes: notes || null,
-      owner_id: user.id,
-    })
+    .insert(insertData)
     .select("id")
     .single();
 
@@ -475,7 +509,7 @@ export async function createClient(
   }
 
   revalidatePath("/dashboard/clients");
-  redirect(`/dashboard/clients/${data.id}`);
+  return { success: locale === "pt" ? "Cliente criado com sucesso." : "Client created successfully.", clientId: data.id };
 }
 
 export async function updateClientInfo(
@@ -509,19 +543,18 @@ export async function updateClientInfo(
     return { error: t.sessionExpired };
   }
 
-  const { error } = await supabase
-    .from("clients")
-    .update({
-      name,
-      website: website || null,
-      description: description || null,
-      photo_url: photoUrl || null,
-      notes: notes || null,
-      country_code,
-      timezone,
-      default_locale,
-    })
-    .eq("id", clientId);
+  const payload = {
+    name,
+    website: website || null,
+    description: description || null,
+    photo_url: photoUrl || null,
+    notes: notes || null,
+    country_code,
+    timezone,
+    default_locale,
+  };
+
+  const { error } = await supabase.from("clients").update(payload).eq("id", clientId);
 
   if (error) {
     return { error: error.message };
@@ -903,10 +936,6 @@ type CompetitorPayload = {
   linkedin: string | null;
   x: string | null;
   notes: string | null;
-  swot_strengths: string | null;
-  swot_weaknesses: string | null;
-  swot_opportunities: string | null;
-  swot_threats: string | null;
 };
 
 function getCompetitorPayload(formData: FormData): CompetitorPayload {
@@ -921,10 +950,6 @@ function getCompetitorPayload(formData: FormData): CompetitorPayload {
     linkedin: String(formData.get("linkedin") || "").trim() || null,
     x: String(formData.get("x") || "").trim() || null,
     notes: String(formData.get("notes") || "").trim() || null,
-    swot_strengths: String(formData.get("swot_strengths") || "").trim() || null,
-    swot_weaknesses: String(formData.get("swot_weaknesses") || "").trim() || null,
-    swot_opportunities: String(formData.get("swot_opportunities") || "").trim() || null,
-    swot_threats: String(formData.get("swot_threats") || "").trim() || null,
   };
 }
 
@@ -1014,6 +1039,262 @@ export async function deleteCompetitor(
   return { success: t.competitorDeleted };
 }
 
+export async function analyzeCompetitorWithAI(
+  competitorId: string,
+  clientId: string,
+  _prevState: ClientActionState,
+  formData: FormData
+): Promise<ClientActionState> {
+  const locale = getActionLocale(formData);
+  const supabase = await createSupabaseServerClient();
+
+  const { data: competitor, error } = await supabase
+    .from("client_competitors")
+    .select(
+      "id, name, website, instagram, tiktok, facebook, youtube, linkedin, x"
+    )
+    .eq("id", competitorId)
+    .eq("client_id", clientId)
+    .single();
+
+  if (error || !competitor) {
+    return { error: error?.message || (locale === "pt" ? "Competidor não encontrado." : "Competitor not found.") };
+  }
+
+  const stageText = (pt: string, en: string) => (locale === "pt" ? pt : en);
+  const safeProgressUpdate = async (patch: Record<string, unknown>) => {
+    const { error: e } = await supabase.from("client_competitors").update(patch).eq("id", competitorId);
+    if (!e) return;
+    const msg = e.message || "";
+    // If progress columns aren't migrated yet, don't fail analysis.
+    if (/ai_profile_progress|ai_profile_stage|ai_profile_started_at/i.test(msg)) return;
+  };
+
+  const statusUpdate = await supabase
+    .from("client_competitors")
+    .update({ ai_profile_status: "running", ai_profile_error: null })
+    .eq("id", competitorId);
+
+  if (statusUpdate.error) {
+    const msg = statusUpdate.error.message || "";
+    if (/ai_profile_status/i.test(msg) || /column .*ai_profile/i.test(msg)) {
+      return {
+        error:
+          locale === "pt"
+            ? "Falta aplicar a migração da base de dados para AI profile do competidor (supabase/scripts/24_client_competitors_ai_profile.sql)."
+            : "Missing database migration for competitor AI profile (supabase/scripts/24_client_competitors_ai_profile.sql).",
+      };
+    }
+    return { error: statusUpdate.error.message };
+  }
+
+  try {
+    // limit URLs to keep latency/cost bounded
+    const urls = collectCompetitorUrls(competitor).slice(0, 8);
+
+    // initialize progress (if columns exist)
+    await safeProgressUpdate({
+      ai_profile_progress: 1,
+      ai_profile_stage: stageText("0–10% • A recolher fontes...", "0–10% • Collecting sources..."),
+      ai_profile_started_at: new Date().toISOString(),
+    });
+
+    const crawl = await crawlManyUrls(urls, {
+      timeoutMs: 9_000,
+      maxBytes: 1_000_000,
+      maxTextChars: 12_000,
+      userAgent: "sm-ai-crawler/1.0 (+https://example.invalid)",
+      onPageCrawled: async ({ done, total }) => {
+        // 10%..60% based on crawl completion
+        const pct = total > 0 ? Math.min(60, 10 + Math.floor((done / total) * 50)) : 60;
+        await safeProgressUpdate({
+          ai_profile_progress: pct,
+          ai_profile_stage: stageText(
+            `${pct}% • A recolher conteúdo (${done}/${total})...`,
+            `${pct}% • Fetching content (${done}/${total})...`
+          ),
+        });
+      },
+    });
+
+    await safeProgressUpdate({
+      ai_profile_progress: 65,
+      ai_profile_stage: stageText("65% • A interpretar os dados...", "65% • Interpreting data..."),
+    });
+
+    const profile = await buildCompetitorProfileWithOpenAI({
+      locale,
+      competitor: { name: competitor.name, website: competitor.website },
+      crawl,
+    });
+
+    await safeProgressUpdate({
+      ai_profile_progress: 90,
+      ai_profile_stage: stageText("90% • A guardar...", "90% • Saving..."),
+    });
+
+    const nowISO = new Date().toISOString();
+    const sources = {
+      input_urls: urls,
+      crawled: crawl.pages.map((p) => ({
+        url: p.finalUrl || p.url,
+        ok: p.ok,
+        status: p.status,
+        title: p.title,
+        description: p.description,
+        contentType: p.contentType,
+      })),
+    };
+    const crawlTrimmed = {
+      startedAtISO: crawl.startedAtISO,
+      finishedAtISO: crawl.finishedAtISO,
+      pages: crawl.pages.map((p) => ({
+        url: p.url,
+        finalUrl: p.finalUrl,
+        ok: p.ok,
+        status: p.status,
+        contentType: p.contentType,
+        title: p.title,
+        description: p.description,
+        text: p.text ? String(p.text).slice(0, 8000) : null,
+        error: p.error,
+      })),
+    };
+
+    const { error: updateError } = await supabase
+      .from("client_competitors")
+      .update({
+        ai_profile: profile as unknown as Record<string, unknown>,
+        ai_profile_sources: sources as unknown as Record<string, unknown>,
+        ai_profile_crawl: crawlTrimmed as unknown as Record<string, unknown>,
+        ai_profile_status: "done",
+        ai_profile_error: null,
+        ai_profile_updated_at: nowISO,
+        ai_profile_progress: 100,
+        ai_profile_stage: stageText("100% • Concluído", "100% • Done"),
+      })
+      .eq("id", competitorId);
+
+    if (updateError) {
+      await supabase
+        .from("client_competitors")
+        .update({ ai_profile_status: "error", ai_profile_error: updateError.message })
+        .eq("id", competitorId);
+      return { error: updateError.message };
+    }
+
+    revalidatePath(`/dashboard/clients/${clientId}/competitors/${competitorId}`);
+    revalidatePath(`/dashboard/clients/${clientId}/competitors`);
+    return { success: locale === "pt" ? "Análise concluída." : "Analysis complete." };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    await supabase
+      .from("client_competitors")
+      .update({
+        ai_profile_status: "error",
+        ai_profile_error: msg,
+        ai_profile_stage: stageText("Erro na análise", "Analysis error"),
+      })
+      .eq("id", competitorId);
+    return { error: msg };
+  }
+}
+
+export async function regenerateCompetitorAISection(
+  competitorId: string,
+  clientId: string,
+  sectionKey: string,
+  _prevState: ClientActionState,
+  formData: FormData
+): Promise<ClientActionState> {
+  const locale = getActionLocale(formData);
+  const supabase = await createSupabaseServerClient();
+
+  const { data: competitor, error: competitorError } = await supabase
+    .from("client_competitors")
+    .select(
+      "id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile, ai_profile_crawl"
+    )
+    .eq("id", competitorId)
+    .eq("client_id", clientId)
+    .single();
+
+  if (competitorError || !competitor) {
+    return { error: competitorError?.message || (locale === "pt" ? "Competidor não encontrado." : "Competitor not found.") };
+  }
+
+  if (!competitor.ai_profile) {
+    return { error: locale === "pt" ? "O perfil de IA ainda não foi gerado. Faz a análise completa primeiro." : "AI profile not generated yet. Run full analysis first." };
+  }
+
+  // Reconstruct crawl from stored data or re-crawl if needed
+  let crawl: Awaited<ReturnType<typeof crawlManyUrls>>;
+  const storedCrawl = competitor.ai_profile_crawl as any;
+  
+  if (storedCrawl?.pages?.length) {
+    // Use stored crawl data
+    crawl = {
+      startedAtISO: storedCrawl.startedAtISO || new Date().toISOString(),
+      finishedAtISO: storedCrawl.finishedAtISO || new Date().toISOString(),
+      pages: storedCrawl.pages.map((p: any) => ({
+        url: p.url,
+        finalUrl: p.finalUrl || p.url,
+        ok: p.ok ?? true,
+        status: p.status ?? 200,
+        contentType: p.contentType || "text/html",
+        title: p.title || null,
+        description: p.description || null,
+        text: p.text || null,
+        error: p.error || null,
+      })),
+    };
+  } else {
+    // Re-crawl if no stored data
+    const urls = collectCompetitorUrls(competitor).slice(0, 8);
+    crawl = await crawlManyUrls(urls, {
+      timeoutMs: 9_000,
+      maxBytes: 1_000_000,
+      maxTextChars: 12_000,
+      userAgent: "sm-ai-crawler/1.0 (+https://example.invalid)",
+    });
+  }
+
+  try {
+    const currentProfile = (competitor.ai_profile || {}) as any;
+    const sectionData = await regenerateCompetitorSectionWithOpenAI({
+      locale: locale === "pt" ? "pt" : "en",
+      competitor: { name: competitor.name, website: competitor.website },
+      crawl,
+      sectionKey: sectionKey as SectionKey,
+      currentProfile,
+    });
+
+    // Merge the regenerated section into the existing profile
+    const updatedProfile = {
+      ...currentProfile,
+      ...sectionData,
+    };
+
+    const { error: updateError } = await supabase
+      .from("client_competitors")
+      .update({
+        ai_profile: updatedProfile as unknown as Record<string, unknown>,
+        ai_profile_updated_at: new Date().toISOString(),
+      })
+      .eq("id", competitorId);
+
+    if (updateError) {
+      return { error: updateError.message };
+    }
+
+    revalidatePath(`/dashboard/clients/${clientId}/competitors/${competitorId}`);
+    return { success: locale === "pt" ? "Secção regenerada com sucesso." : "Section regenerated successfully." };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    return { error: msg };
+  }
+}
+
 export async function setActiveStrategy(
   strategyId: string,
   clientId: string,
@@ -1093,12 +1374,20 @@ export async function generateScheduleDraft(
         (
           await supabase
             .from("client_competitors")
-            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
             .eq("client_id", clientId)
             .in("id", competitorIds)
         ).data ?? []
       ) as CompetitorRowForAI[]
     : [];
+
+  // Extract competitor insights from AI profiles
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
 
   const referenceGroupIds = strategy.reference_group_ids;
   const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
@@ -1111,6 +1400,25 @@ export async function generateScheduleDraft(
             .in("id", referenceGroupIds)
         ).data ?? []
       ) as ReferenceGroupRowForAI[]
+    : [];
+
+  // Fetch reference items examples (titles/captions) from selected folders
+  const referenceExamples: Array<{ title: string; description?: string | null; group_name: string }> = referenceGroupIds?.length
+    ? (
+        (
+          await supabase
+            .from("client_reference_items")
+            .select("title, description, client_reference_groups(name)")
+            .eq("client_id", clientId)
+            .in("group_id", referenceGroupIds)
+            .order("created_at", { ascending: false })
+            .limit(15)
+        ).data?.map((item: any) => ({
+          title: item.title || "",
+          description: item.description,
+          group_name: item.client_reference_groups?.name || "",
+        })) ?? []
+      )
     : [];
 
   const brandContext = await fetchClientContextForAI(supabase, clientId);
@@ -1153,11 +1461,20 @@ export async function generateScheduleDraft(
   }
 
   const strategyForAI = {
-    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders),
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
     client: brandContext.client ?? undefined,
     editorial_profile: brandContext.editorial_profile ?? undefined,
     business_tags: brandContext.business_tags,
+    reference_examples: referenceExamples.length > 0 ? referenceExamples : undefined,
   };
+
+  // Get optimal posting slots for the allowed platforms
+  const optimalSlots = await getOptimalPostingSlots(clientId, allowedPlatforms, supabase);
+  const optimalSlotsText = formatOptimalSlotsForPrompt(optimalSlots, aiLocale);
+
+  // Get trending topics based on business tags and current season
+  const trendingTopics = getTrendingTopics(brandContext.business_tags, aiLocale);
+  const trendingTopicsText = formatTrendingTopicsForPrompt(trendingTopics, aiLocale);
 
   const { data: draft, error: draftError } = await supabase
     .from("client_schedule_drafts")
@@ -1191,6 +1508,9 @@ export async function generateScheduleDraft(
     recentPlannings,
     holidays,
     persona: persona ?? undefined,
+    optimalSlots: optimalSlotsText,
+    trendingTopics: trendingTopicsText,
+    clientType: (brandContext.client as any)?.client_type || "services",
   });
 
   const rows = proposal.items.map((item) => ({
@@ -1245,6 +1565,13 @@ export async function acceptScheduleItem(
     .single();
 
   if (error) return { error: error.message };
+
+  // Analyze posting patterns in background (don't block the response)
+  if (data) {
+    analyzeClientPostingPatterns(clientId, supabase).catch((err) => {
+      console.error("Failed to analyze posting patterns:", err);
+    });
+  }
 
   // Se não existir mais nenhum item "suggested" neste draft, marcamos o draft como "published".
   if (data?.draft_id) {

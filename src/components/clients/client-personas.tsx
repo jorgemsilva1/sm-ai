@@ -527,7 +527,7 @@ export function ClientPersonaForm({
             <Textarea id="persona-notes" name="notes" rows={2} />
           </div>
           <div className="md:col-span-2">
-            <SubmitButton className="bg-brand text-primary-foreground">
+            <SubmitButton variant="brand">
               {t.clients.sections.personasActions.create}
             </SubmitButton>
           </div>
@@ -833,6 +833,13 @@ export function PersonaEditor({
   const deleteFormRef = useRef<HTMLFormElement | null>(null);
 
   const styleOptions = useMemo(() => getStyleOptions(locale), [locale]);
+  const genderOptions = useMemo(
+    () =>
+      locale === "pt"
+        ? ["Feminino", "Masculino", "Não-binário", "Outro", "Prefere não dizer"]
+        : ["Female", "Male", "Non-binary", "Other", "Prefer not to say"],
+    [locale]
+  );
   const goals = splitList(persona.goals);
   const channels = splitList(persona.channels);
   const stylePreferences = splitList(persona.style_preferences);
@@ -1116,7 +1123,7 @@ export function PersonaEditor({
             />
           </div>
           <div className="flex flex-wrap items-center gap-3 md:col-span-2">
-            <SubmitButton className="bg-brand text-primary-foreground">
+            <SubmitButton variant="brand">
               {t.clients.sections.personasActions.update}
             </SubmitButton>
           </div>

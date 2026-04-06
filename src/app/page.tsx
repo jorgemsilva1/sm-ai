@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { LanguageSwitcher } from "@/components/i18n/language-switcher";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { cookies } from "next/headers";
 import { copy, getLocale } from "@/lib/i18n";
 
@@ -16,11 +17,12 @@ export default async function Home() {
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-8">
         <Logo />
         <div className="flex items-center gap-3 text-sm">
+          <ThemeToggle locale={locale} />
           <LanguageSwitcher locale={locale} />
           <Button asChild variant="ghost">
             <Link href="/login">{t.home.signIn}</Link>
           </Button>
-          <Button asChild className="bg-brand text-primary-foreground">
+          <Button asChild variant="brand">
             <Link href="/signup">{t.home.createAccount}</Link>
           </Button>
         </div>
@@ -39,7 +41,7 @@ export default async function Home() {
               {t.home.heroSubtitle}
             </p>
             <div className="flex flex-wrap gap-3">
-              <Button asChild className="bg-brand text-primary-foreground">
+              <Button asChild variant="brand">
                 <Link href="/signup">{t.home.heroPrimary}</Link>
               </Button>
               <Button asChild variant="outline">

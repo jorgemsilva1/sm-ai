@@ -38,6 +38,9 @@ export const copy = {
       updatedTitle: "Updated",
       successTitle: "Success",
       other: "Other",
+      themeSystem: "System",
+      themeLight: "Light",
+      themeDark: "Dark",
     },
     auth: {
       loginTitle: "Sign in",
@@ -300,6 +303,7 @@ export const copy = {
           socials: "Social links",
           notes: "Notes",
           swot: "SWOT",
+          ai: "AI profile",
         },
         competitorsFields: {
           name: "Competitor name",
@@ -317,6 +321,8 @@ export const copy = {
           update: "Save changes",
           view: "View competitor",
           delete: "Delete",
+          analyze: "Analyze with AI",
+          analyzing: "Analyzing...",
         },
         referencesGroupsTitle: "Reference folders",
         referencesGroupsSubtitle: "Organize references by themes or campaigns.",
@@ -668,6 +674,7 @@ export const copy = {
         integrationsBody: "Connect tools and platforms. Coming soon.",
         settingsTitle: "Settings",
         settingsSubtitle: "Client settings and preferences.",
+        settingsCrawlerTab: "Crawler",
         settingsBody: "Configure preferences and access. Coming soon.",
       },
       deepChat: {
@@ -692,6 +699,9 @@ export const copy = {
       updatedTitle: "Atualizado",
       successTitle: "Feito",
       other: "Outro",
+      themeSystem: "Sistema",
+      themeLight: "Claro",
+      themeDark: "Escuro",
     },
     auth: {
       loginTitle: "Entrar",
@@ -955,6 +965,7 @@ export const copy = {
           socials: "Redes sociais",
           notes: "Notas",
           swot: "SWOT",
+          ai: "Perfil IA",
         },
         competitorsFields: {
           name: "Nome do competidor",
@@ -972,6 +983,8 @@ export const copy = {
           update: "Guardar alterações",
           view: "Ver competidor",
           delete: "Eliminar",
+          analyze: "Analisar com IA",
+          analyzing: "A analisar...",
         },
         referencesGroupsTitle: "Pastas de referências",
         referencesGroupsSubtitle: "Organiza referências por temas ou campanhas.",
@@ -1323,6 +1336,7 @@ export const copy = {
         integrationsBody: "Liga ferramentas e plataformas. Em breve.",
         settingsTitle: "Definições",
         settingsSubtitle: "Definições e preferências do cliente.",
+        settingsCrawlerTab: "Crawler",
         settingsBody: "Configura preferências e acessos. Em breve.",
       },
       deepChat: {

@@ -5,6 +5,8 @@ import {
   type ScheduleProposedItem,
   type ScheduleProposal,
 } from "@/lib/ai/schedule-schema";
+import { getContentCreatorPrompt } from "./prompts/content-creator";
+import { getBrandPrompt } from "./prompts/brand";
 
 type StrategyForAI = {
   id: string;
@@ -49,6 +51,27 @@ type StrategyForAI = {
   reference_folders?: Array<{
     name: string;
     description?: string | null;
+  }>;
+  competitor_insights?: {
+    summary: string;
+    insights: {
+      contentThemes?: string[];
+      contentFormats?: string[];
+      hooks?: string[];
+      ctas?: string[];
+      keywords?: string[];
+      messagingPillars?: string[];
+      toneTraits?: string[];
+      whatToEmulate?: string[];
+      whatToAvoid?: string[];
+      whitespaceOpportunities?: string[];
+      counterAngles?: string[];
+    };
+  };
+  reference_examples?: Array<{
+    title: string;
+    description?: string | null;
+    group_name: string;
   }>;
 };
 
@@ -96,6 +119,9 @@ type GenerateScheduleInput = {
     type: string;
   }>;
   persona?: PersonaForAI;
+  optimalSlots?: string; // Formatted optimal posting slots by platform
+  trendingTopics?: string; // Formatted trending topics
+  clientType?: "services" | "content_creator"; // Client type to determine prompt style
 };
 
 const ALL_PLATFORMS = ["instagram", "tiktok", "facebook", "linkedin", "x", "youtube", "blog"] as const;
@@ -140,9 +166,13 @@ export async function generateScheduleWithOpenAI(
       ? "És um estratega de social media. Responde SEMPRE em JSON válido e APENAS JSON."
       : "You are a social media strategist. Respond ONLY with valid JSON and ONLY JSON.";
 
-  const user =
-    input.locale === "pt"
-      ? `Gera uma proposta de calendarização de conteúdos.
+  // Use client-type-specific prompt if available, otherwise use default
+  const user = input.clientType === "content_creator"
+    ? getContentCreatorPrompt(input)
+    : input.clientType === "services"
+    ? getBrandPrompt(input)
+    : input.locale === "pt"
+    ? `Gera uma proposta de calendarização de conteúdos.
 
 Regras:
 - O output tem de seguir exatamente o schema JSON.
@@ -155,11 +185,34 @@ Regras:
 - Em cada ponto de rationale, preenche strategyReference.field com um dos valores do schema e strategyReference.snippet com um excerto curto.
 - O texto de reason deve ser direto e explícito (ex.: "A é sugerido porque ..."), sem generalidades.
 - Em CADA item, inclui pelo menos 1 ponto de rationale com strategyReference.field = "timing" e explica a escolha do dia e da hora (timezone, comportamento do canal e o que a estratégia pede).
+- IMPORTANTE: Prefere usar os horários ideais sugeridos abaixo. Eles são baseados em estudos da indústria e no histórico deste cliente.
+
+Horários ideais por plataforma (preferir estes slots):
+${input.optimalSlots || "Não disponível - usar lógica padrão de social media"}
+
+${input.trendingTopics ? `Tópicos em tendência (considera para temas e ângulos de conteúdo):
+${input.trendingTopics}
+IMPORTANTE: Usa estes tópicos como inspiração para criar conteúdo relevante e atual.` : ""}
 
 Contexto:
 - Timezone: ${input.timezone}
 - Intervalo: ${input.startDate} a ${input.endDate}
 - Estratégia: ${JSON.stringify(input.strategy)}
+${input.strategy.competitor_insights ? `- Insights dos competidores (ANALISA E USA ESTES INSIGHTS PARA CRIAR CONTEÚDO MELHOR OU DIFERENTE):
+  Resumo: ${input.strategy.competitor_insights.summary}
+  Temas de conteúdo: ${input.strategy.competitor_insights.insights.contentThemes?.slice(0, 10).join(", ") || "N/A"}
+  Formatos: ${input.strategy.competitor_insights.insights.contentFormats?.slice(0, 10).join(", ") || "N/A"}
+  Hooks eficazes: ${input.strategy.competitor_insights.insights.hooks?.slice(0, 10).join(", ") || "N/A"}
+  CTAs: ${input.strategy.competitor_insights.insights.ctas?.slice(0, 10).join(", ") || "N/A"}
+  Keywords: ${input.strategy.competitor_insights.insights.keywords?.slice(0, 15).join(", ") || "N/A"}
+  Pilares de mensagem: ${input.strategy.competitor_insights.insights.messagingPillars?.slice(0, 10).join(", ") || "N/A"}
+  Oportunidades para emular: ${input.strategy.competitor_insights.insights.whatToEmulate?.slice(0, 5).join(", ") || "N/A"}
+  Espaços em branco (oportunidades): ${input.strategy.competitor_insights.insights.whitespaceOpportunities?.slice(0, 5).join(", ") || "N/A"}
+  Ângulos de contra-posicionamento: ${input.strategy.competitor_insights.insights.counterAngles?.slice(0, 5).join(", ") || "N/A"}
+  IMPORTANTE: Usa estes insights para criar conteúdo que seja melhor, diferente ou explore oportunidades que os competidores não estão a explorar.` : ""}
+${input.strategy.reference_examples && input.strategy.reference_examples.length > 0 ? `- Exemplos de referências (usa como inspiração para criar conteúdo similar mas único):
+${input.strategy.reference_examples.slice(0, 10).map((ex, i) => `  ${i + 1}. [${ex.group_name}] ${ex.title}${ex.description ? ` - ${ex.description}` : ""}`).join("\n")}
+  IMPORTANTE: Usa estes exemplos como inspiração, mas cria conteúdo original e adaptado à estratégia.` : ""}
 - Persona (público-alvo principal; usar linguagem, dores, objeções e preferências): ${JSON.stringify(input.persona ?? null)}
 - Planificações recentes (para consistência, evitar repetição e manter lógica): ${JSON.stringify(input.recentPlannings ?? [])}
 - Feriados/bank holidays do país (considera para timing e temas): ${JSON.stringify(input.holidays ?? [])}
@@ -177,11 +230,34 @@ Rules:
 - For each rationale point, fill strategyReference.field with a schema value and strategyReference.snippet with a short excerpt.
 - The reason text must be explicit and direct (e.g. "A is suggested because ..."), avoid generic statements.
 - For EACH item, include at least 1 rationale point with strategyReference.field = "timing" explaining the day/time choice (timezone, platform behavior, and strategy constraints).
+- IMPORTANT: Prefer using the optimal posting times suggested below. They are based on industry studies and this client's historical data.
+
+Optimal posting times by platform (prefer these slots):
+${input.optimalSlots || "Not available - use standard social media logic"}
+
+${input.trendingTopics ? `Trending topics (consider for content themes and angles):
+${input.trendingTopics}
+IMPORTANT: Use these topics as inspiration to create relevant and current content.` : ""}
 
 Context:
 - Timezone: ${input.timezone}
 - Range: ${input.startDate} to ${input.endDate}
 - Strategy: ${JSON.stringify(input.strategy)}
+${input.strategy.competitor_insights ? `- Competitor insights (ANALYZE AND USE THESE INSIGHTS TO CREATE BETTER OR DIFFERENT CONTENT):
+  Summary: ${input.strategy.competitor_insights.summary}
+  Content themes: ${input.strategy.competitor_insights.insights.contentThemes?.slice(0, 10).join(", ") || "N/A"}
+  Formats: ${input.strategy.competitor_insights.insights.contentFormats?.slice(0, 10).join(", ") || "N/A"}
+  Effective hooks: ${input.strategy.competitor_insights.insights.hooks?.slice(0, 10).join(", ") || "N/A"}
+  CTAs: ${input.strategy.competitor_insights.insights.ctas?.slice(0, 10).join(", ") || "N/A"}
+  Keywords: ${input.strategy.competitor_insights.insights.keywords?.slice(0, 15).join(", ") || "N/A"}
+  Messaging pillars: ${input.strategy.competitor_insights.insights.messagingPillars?.slice(0, 10).join(", ") || "N/A"}
+  Opportunities to emulate: ${input.strategy.competitor_insights.insights.whatToEmulate?.slice(0, 5).join(", ") || "N/A"}
+  Whitespace opportunities: ${input.strategy.competitor_insights.insights.whitespaceOpportunities?.slice(0, 5).join(", ") || "N/A"}
+  Counter-positioning angles: ${input.strategy.competitor_insights.insights.counterAngles?.slice(0, 5).join(", ") || "N/A"}
+  IMPORTANT: Use these insights to create content that is better, different, or explores opportunities competitors are not exploring.` : ""}
+${input.strategy.reference_examples && input.strategy.reference_examples.length > 0 ? `- Reference examples (use as inspiration to create similar but unique content):
+${input.strategy.reference_examples.slice(0, 10).map((ex, i) => `  ${i + 1}. [${ex.group_name}] ${ex.title}${ex.description ? ` - ${ex.description}` : ""}`).join("\n")}
+  IMPORTANT: Use these examples as inspiration, but create original content adapted to the strategy.` : ""}
 - Persona (primary target audience; use language, pain points, objections, preferences): ${JSON.stringify(input.persona ?? null)}
 - Recent plannings (keep consistency, avoid repetition, follow a logic): ${JSON.stringify(input.recentPlannings ?? [])}
 - Country holidays/bank holidays (consider for timing and themes): ${JSON.stringify(input.holidays ?? [])}
@@ -193,7 +269,7 @@ Context:
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    temperature: 0.7,
+    temperature: 0.85,
     text: {
       format: {
         type: "json_schema",

@@ -8,6 +8,8 @@ import { copy, Locale } from "@/lib/i18n";
 type BusinessTagPickerProps = {
   tags: BusinessTag[];
   selectedSlugs?: string[];
+  selectedTags?: string[];
+  onTagsChange?: (tags: string[]) => void;
   name?: string;
   locale: Locale;
 };
@@ -15,12 +17,16 @@ type BusinessTagPickerProps = {
 export function BusinessTagPicker({
   tags,
   selectedSlugs = [],
+  selectedTags,
+  onTagsChange,
   name = "business_tags",
   locale,
 }: BusinessTagPickerProps) {
   const t = copy[locale];
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string[]>(selectedSlugs);
+  const isControlled = selectedTags !== undefined && onTagsChange !== undefined;
+  const [internalSelected, setInternalSelected] = useState<string[]>(selectedSlugs);
+  const selected = isControlled ? selectedTags : internalSelected;
 
   const filteredTags = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -31,13 +37,25 @@ export function BusinessTagPicker({
   }, [query, tags]);
 
   const toggleTag = (slug: string) => {
-    setSelected((prev) =>
-      prev.includes(slug) ? prev.filter((item) => item !== slug) : [...prev, slug]
-    );
+    const newSelected = selected.includes(slug)
+      ? selected.filter((item) => item !== slug)
+      : [...selected, slug];
+    
+    if (isControlled) {
+      onTagsChange!(newSelected);
+    } else {
+      setInternalSelected(newSelected);
+    }
   };
 
   const removeTag = (slug: string) => {
-    setSelected((prev) => prev.filter((item) => item !== slug));
+    const newSelected = selected.filter((item) => item !== slug);
+    
+    if (isControlled) {
+      onTagsChange!(newSelected);
+    } else {
+      setInternalSelected(newSelected);
+    }
   };
 
   return (

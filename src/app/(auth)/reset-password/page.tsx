@@ -45,7 +45,7 @@ export default function ResetPasswordPage() {
             <Label htmlFor="email">Email</Label>
             <Input id="email" name="email" type="email" required />
           </div>
-          <SubmitButton className="w-full bg-brand text-primary-foreground">
+          <SubmitButton variant="brand" className="w-full">
             {t.auth.resetSubmit}
           </SubmitButton>
         </form>

@@ -29,14 +29,52 @@ export default async function ClientCompetitorDetailPage({
     notFound();
   }
 
-  const { data: competitor, error: competitorError } = await supabase
+  // Try with all columns first (including new progress columns)
+  let competitor = null;
+  let competitorError = null;
+
+  const withAICols = await supabase
     .from("client_competitors")
     .select(
-      "id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, notes, swot_strengths, swot_weaknesses, swot_opportunities, swot_threats, created_at, updated_at"
+      "id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, notes, ai_profile, ai_profile_status, ai_profile_error, ai_profile_updated_at, ai_profile_progress, ai_profile_stage, created_at, updated_at"
     )
     .eq("id", competitorId)
     .eq("client_id", client.id)
     .single();
+
+  if (withAICols.data) {
+    competitor = withAICols.data;
+  } else if (withAICols.error) {
+    // If error, try without progress columns (they might not exist yet)
+    const withoutProgress = await supabase
+      .from("client_competitors")
+      .select(
+        "id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, notes, ai_profile, ai_profile_status, ai_profile_error, ai_profile_updated_at, created_at, updated_at"
+      )
+      .eq("id", competitorId)
+      .eq("client_id", client.id)
+      .single();
+
+    if (withoutProgress.data) {
+      competitor = withoutProgress.data;
+    } else {
+      // Final fallback: basic columns only
+      const basic = await supabase
+        .from("client_competitors")
+        .select(
+          "id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, notes, created_at, updated_at"
+        )
+        .eq("id", competitorId)
+        .eq("client_id", client.id)
+        .single();
+
+      if (basic.data) {
+        competitor = basic.data;
+      } else {
+        competitorError = basic.error;
+      }
+    }
+  }
 
   if (competitorError || !competitor) {
     notFound();

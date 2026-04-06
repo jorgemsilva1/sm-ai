@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ClientCreateModal } from "@/components/clients/client-create-modal";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Card } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cookies } from "next/headers";
 import { copy, getLocale } from "@/lib/i18n";
@@ -18,11 +19,11 @@ export default async function ClientsPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">{t.clients.listTitle}</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight">{t.clients.listTitle}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             {t.clients.listSubtitle}
           </p>
         </div>
@@ -36,51 +37,41 @@ export default async function ClientsPage() {
         </Alert>
       ) : null}
 
-      <div className="divide-y divide-border/40 rounded-md border border-border/40">
-        {clients?.length ? (
-          clients.map((client) => (
-            <div key={client.id} className="p-5">
-              <div className="flex items-start justify-between gap-6">
+      {clients?.length ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {clients.map((client) => (
+            <Link key={client.id} href={`/dashboard/clients/${client.id}`} className="group">
+              <Card className="h-full border-border/20 bg-surface-1 p-5 transition-default hover:border-border/50 hover:bg-surface-2">
                 <div className="flex items-start gap-3">
-                  <Avatar className="size-10">
+                  <Avatar className="size-11 ring-2 ring-border/20">
                     {client.photo_url ? (
                       <AvatarImage src={client.photo_url} alt={client.name} />
                     ) : null}
-                    <AvatarFallback>
+                    <AvatarFallback className="bg-surface-2 text-sm font-semibold">
                       {client.name.slice(0, 2).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="space-y-1">
-                    <h2 className="text-lg font-semibold">{client.name}</h2>
-                    <div className="text-sm text-muted-foreground">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="truncate text-base font-semibold transition-default group-hover:text-brand">
+                      {client.name}
+                    </h2>
+                    <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">
                       {client.description || t.clients.noDescription}
-                    </div>
-                    {client.website ? (
-                      <a
-                        href={client.website}
-                        className="text-sm text-brand hover:underline"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {client.website}
-                      </a>
-                    ) : null}
+                    </p>
                   </div>
                 </div>
-                <Button asChild variant="outline" size="sm">
-                  <Link href={`/dashboard/clients/${client.id}`}>
-                    {t.clients.clientProfile}
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="p-6 text-sm text-muted-foreground">
-            {t.clients.emptyState}
-          </div>
-        )}
-      </div>
+                {client.website ? (
+                  <p className="mt-3 truncate text-xs text-brand/70">{client.website}</p>
+                ) : null}
+              </Card>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/30 bg-surface-1/50 px-6 py-16 text-center">
+          <p className="text-sm font-medium text-muted-foreground">{t.clients.emptyState}</p>
+        </div>
+      )}
     </div>
   );
 }

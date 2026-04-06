@@ -54,7 +54,7 @@ export default function LoginPage() {
             <Label htmlFor="password">{t.auth.password}</Label>
             <Input id="password" name="password" type="password" required />
           </div>
-          <SubmitButton className="w-full bg-brand text-primary-foreground">
+          <SubmitButton variant="brand" className="w-full">
             {t.auth.loginTitle}
           </SubmitButton>
         </form>

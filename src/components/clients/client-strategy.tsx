@@ -52,6 +52,7 @@ type ClientStrategyListProps = {
 type ClientStrategyCreateProps = {
   clientId: string;
   locale: Locale;
+  clientType?: "services" | "content_creator";
   initialTitle?: string;
   initialTemplateId?: string;
   personas: { id: string; name: string }[];
@@ -136,13 +137,13 @@ export function ClientStrategyList({ clientId, locale, strategies }: ClientStrat
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold">{t.clients.sections.strategyTitle}</h2>
           <p className="text-sm text-muted-foreground">{t.clients.sections.strategyBody}</p>
         </div>
-        <Button className="bg-brand text-primary-foreground" onClick={() => setShowCreateModal(true)}>
+        <Button variant="brand" onClick={() => setShowCreateModal(true)}>
           {t.clients.sections.strategyActions.create}
         </Button>
       </div>
@@ -159,8 +160,8 @@ export function ClientStrategyList({ clientId, locale, strategies }: ClientStrat
           ))}
         </div>
       ) : (
-        <div className="rounded-md border border-border/40 p-4 text-sm text-muted-foreground">
-          {t.clients.sections.strategyEmpty}
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/30 bg-surface-1/50 px-6 py-16 text-center">
+          <p className="text-sm font-medium text-muted-foreground">{t.clients.sections.strategyEmpty}</p>
         </div>
       )}
 
@@ -225,7 +226,7 @@ export function ClientStrategyList({ clientId, locale, strategies }: ClientStrat
                 {t.clients.sections.strategyCreateNoTemplate}
               </Button>
               <Button
-                className="bg-brand text-primary-foreground"
+                variant="brand"
                 onClick={handleContinue}
                 disabled={!draftName.trim()}
               >
@@ -242,6 +243,7 @@ export function ClientStrategyList({ clientId, locale, strategies }: ClientStrat
 export function ClientStrategyCreate({
   clientId,
   locale,
+  clientType = "services",
   initialTitle,
   initialTemplateId,
   personas,
@@ -587,6 +589,44 @@ export function ClientStrategyCreate({
                 {locale === "pt" ? "Ativar datas festivas" : "Enable celebration dates"}
               </label>
             </div>
+            {clientType === "content_creator" ? (
+              <div className="space-y-2 md:col-span-2">
+                <FieldLabel
+                  htmlFor="strategy-personal-story"
+                  label={locale === "pt" ? "Ângulo de história pessoal" : "Personal story angle"}
+                  tooltip={locale === "pt" 
+                    ? "Como queres incorporar a tua história pessoal e autenticidade no conteúdo?"
+                    : "How do you want to incorporate your personal story and authenticity into content?"}
+                />
+                <Textarea
+                  id="strategy-personal-story"
+                  name="personal_story_angle"
+                  rows={2}
+                  placeholder={locale === "pt" 
+                    ? "Ex: Partilhar experiências pessoais, mostrar o processo criativo..."
+                    : "E.g. Share personal experiences, show creative process..."}
+                />
+              </div>
+            ) : null}
+            {clientType === "services" ? (
+              <div className="space-y-2 md:col-span-2">
+                <FieldLabel
+                  htmlFor="strategy-campaign-objectives"
+                  label={locale === "pt" ? "Objetivos de campanha" : "Campaign objectives"}
+                  tooltip={locale === "pt"
+                    ? "Objetivos específicos de negócio para esta estratégia (ex: conversões, awareness, lead generation)"
+                    : "Specific business objectives for this strategy (e.g. conversions, awareness, lead generation)"}
+                />
+                <Textarea
+                  id="strategy-campaign-objectives"
+                  name="campaign_objectives"
+                  rows={2}
+                  placeholder={locale === "pt"
+                    ? "Ex: Aumentar vendas em 20%, gerar 100 leads qualificados..."
+                    : "E.g. Increase sales by 20%, generate 100 qualified leads..."}
+                />
+              </div>
+            ) : null}
             <div className="space-y-2 md:col-span-2">
               <FieldLabel
                 htmlFor="strategy-competitors"
@@ -983,7 +1023,7 @@ export function ClientStrategyCreate({
               {t.clients.sections.strategyActions.next}
             </Button>
           ) : (
-            <SubmitButton className="bg-brand text-primary-foreground" disabled={!canSave}>
+            <SubmitButton variant="brand" disabled={!canSave}>
               {t.clients.sections.strategyActions.save}
             </SubmitButton>
           )}
@@ -996,6 +1036,7 @@ export function ClientStrategyCreate({
 export function ClientStrategyEditor({
   clientId,
   locale,
+  clientType = "services",
   strategy,
   personas,
   competitors,
@@ -1003,6 +1044,7 @@ export function ClientStrategyEditor({
 }: {
   clientId: string;
   locale: Locale;
+  clientType?: "services" | "content_creator";
   strategy: Strategy;
   personas: { id: string; name: string }[];
   competitors: { id: string; name: string }[];
@@ -1387,6 +1429,44 @@ export function ClientStrategyEditor({
                 {locale === "pt" ? "Ativar datas festivas" : "Enable celebration dates"}
               </label>
             </div>
+            {clientType === "content_creator" ? (
+              <div className="space-y-2 md:col-span-2">
+                <FieldLabel
+                  htmlFor={`strategy-personal-story-${strategy.id}`}
+                  label={locale === "pt" ? "Ângulo de história pessoal" : "Personal story angle"}
+                  tooltip={locale === "pt" 
+                    ? "Como queres incorporar a tua história pessoal e autenticidade no conteúdo?"
+                    : "How do you want to incorporate your personal story and authenticity into content?"}
+                />
+                <Textarea
+                  id={`strategy-personal-story-${strategy.id}`}
+                  name="personal_story_angle"
+                  rows={2}
+                  placeholder={locale === "pt" 
+                    ? "Ex: Partilhar experiências pessoais, mostrar o processo criativo..."
+                    : "E.g. Share personal experiences, show creative process..."}
+                />
+              </div>
+            ) : null}
+            {clientType === "services" ? (
+              <div className="space-y-2 md:col-span-2">
+                <FieldLabel
+                  htmlFor={`strategy-campaign-objectives-${strategy.id}`}
+                  label={locale === "pt" ? "Objetivos de campanha" : "Campaign objectives"}
+                  tooltip={locale === "pt"
+                    ? "Objetivos específicos de negócio para esta estratégia (ex: conversões, awareness, lead generation)"
+                    : "Specific business objectives for this strategy (e.g. conversions, awareness, lead generation)"}
+                />
+                <Textarea
+                  id={`strategy-campaign-objectives-${strategy.id}`}
+                  name="campaign_objectives"
+                  rows={2}
+                  placeholder={locale === "pt"
+                    ? "Ex: Aumentar vendas em 20%, gerar 100 leads qualificados..."
+                    : "E.g. Increase sales by 20%, generate 100 qualified leads..."}
+                />
+              </div>
+            ) : null}
           <div className="space-y-2 md:col-span-2">
             <FieldLabel
               htmlFor={`strategy-competitors-${strategy.id}`}
@@ -1559,9 +1639,16 @@ export function ClientStrategyEditor({
                   />
                   <Label
                     htmlFor={`format-${strategy.id}-${option}`}
-                    className="cursor-pointer rounded-full border border-border/60 px-3 py-1 text-sm peer-checked:border-brand/60 peer-checked:bg-brand/10"
+                    className={`cursor-pointer rounded-full border border-border/60 px-3 py-1 text-sm peer-checked:border-brand/60 peer-checked:bg-brand/10 ${
+                      clientType === "content_creator" && (option === "reel" || option === "short" || option === "story")
+                        ? "ring-2 ring-brand/40"
+                        : ""
+                    }`}
                   >
                     {option}
+                    {clientType === "content_creator" && (option === "reel" || option === "short" || option === "story") ? (
+                      <span className="ml-1 text-xs text-brand">★</span>
+                    ) : null}
                   </Label>
                 </div>
               ))}
@@ -1785,7 +1872,7 @@ export function ClientStrategyEditor({
               {t.clients.sections.strategyActions.next}
             </Button>
           ) : (
-            <SubmitButton className="bg-brand text-primary-foreground" disabled={!canSave}>
+            <SubmitButton variant="brand" disabled={!canSave}>
               {t.clients.sections.strategyActions.save}
             </SubmitButton>
           )}
@@ -1839,7 +1926,7 @@ function StrategyCard({
   };
 
   return (
-    <div className="rounded-md border border-border/40 p-4">
+    <div className={`rounded-xl border p-4 transition-default ${strategy.is_active ? "border-brand/30 bg-surface-1 shadow-sm" : "border-border/20 bg-surface-1"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -1861,11 +1948,11 @@ function StrategyCard({
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          {!strategy.is_active ? (
-            <Button variant="outline" size="sm" onClick={setActive} disabled={isPending}>
-              {t.clients.sections.strategyActions.setActive}
-            </Button>
-          ) : null}
+        {!strategy.is_active ? (
+          <Button variant="outline" size="sm" onClick={setActive} disabled={isPending}>
+            {t.clients.sections.strategyActions.setActive}
+          </Button>
+        ) : null}
           <EntityContextMenu
             ariaLabel={locale === "pt" ? "Ações da estratégia" : "Strategy actions"}
             items={[

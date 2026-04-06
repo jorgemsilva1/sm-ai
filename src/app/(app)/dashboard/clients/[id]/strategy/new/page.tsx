@@ -26,7 +26,7 @@ export default async function ClientStrategyCreatePage({
 
   const { data: client, error } = await supabase
     .from("clients")
-    .select("id, name")
+    .select("id, name, client_type")
     .eq("id", id)
     .single();
 
@@ -78,6 +78,7 @@ export default async function ClientStrategyCreatePage({
       <ClientStrategyCreate
         clientId={client.id}
         locale={locale}
+        clientType={(client.client_type as "services" | "content_creator") || "services"}
         initialTitle={initialTitle}
         initialTemplateId={initialTemplateId}
         personas={personas ?? []}

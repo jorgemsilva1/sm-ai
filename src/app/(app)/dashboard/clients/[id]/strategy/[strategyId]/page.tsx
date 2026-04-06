@@ -21,7 +21,7 @@ export default async function ClientStrategyDetailPage({
 
   const { data: client, error } = await supabase
     .from("clients")
-    .select("id, name")
+    .select("id, name, client_type")
     .eq("id", id)
     .single();
 
@@ -84,6 +84,7 @@ export default async function ClientStrategyDetailPage({
       <ClientStrategyEditor
         clientId={client.id}
         locale={locale}
+        clientType={(client.client_type as "services" | "content_creator") || "services"}
         strategy={strategy}
         personas={personas ?? []}
         competitors={competitors ?? []}

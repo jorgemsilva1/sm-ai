@@ -340,7 +340,7 @@ export function ScheduleGeneratorModal({
 
   return (
     <>
-      <Button type="button" className="bg-brand text-primary-foreground" onClick={() => setOpen(true)}>
+      <Button type="button" variant="brand" onClick={() => setOpen(true)}>
         {labels.create}
       </Button>
 
@@ -423,7 +423,7 @@ export function ScheduleGeneratorModal({
                       <p className="text-xs text-muted-foreground">{labels.setupHint}</p>
                       <Button
                         type="button"
-                        className="bg-brand text-primary-foreground"
+                        variant="brand"
                         disabled={!canConfirm || isPending}
                         onClick={confirmAndRun}
                       >
@@ -494,7 +494,7 @@ export function ScheduleGeneratorModal({
                             <Button
                               type="button"
                               size="sm"
-                              className="bg-brand text-primary-foreground"
+                              variant="brand"
                               disabled={post.status === "accepted" || post.status === "retrying"}
                               onClick={() => acceptPost(post.id)}
                             >

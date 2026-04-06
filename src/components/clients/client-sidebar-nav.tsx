@@ -130,15 +130,15 @@ export function ClientSidebarNav({ clientId, locale }: ClientSidebarNavProps) {
   const t = copy[locale].clientNav;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {sections.map((section) => (
-        <div key={section.group} className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div key={section.group} className="space-y-1">
+          <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/60">
             {section.group === "editorial" && t.editorial}
             {section.group === "contentOps" && t.contentOps}
             {section.group === "insightsTools" && t.insightsTools}
           </div>
-          <nav className="space-y-1 text-sm text-muted-foreground">
+          <nav className="space-y-0.5">
             {section.items.map((item) => {
               const href = `/dashboard/clients/${clientId}/${item.path}`;
               const isActive =
@@ -152,11 +152,13 @@ export function ClientSidebarNav({ clientId, locale }: ClientSidebarNavProps) {
                   key={item.key}
                   href={href}
                   className={cn(
-                    "flex items-center gap-2 rounded-md px-3 py-2 transition hover:bg-muted/60 hover:text-foreground",
-                    isActive && "bg-muted/60 text-foreground"
+                    "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-default",
+                    isActive
+                      ? "bg-brand/10 font-medium text-brand shadow-sm"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className={cn("h-4 w-4", isActive && "text-brand")} />
                   <span>
                     {item.key === "editorial" && t.items.editorial}
                     {item.key === "references" && t.items.references}
@@ -179,7 +181,7 @@ export function ClientSidebarNav({ clientId, locale }: ClientSidebarNavProps) {
               );
             })}
           </nav>
-          <div className="border-b border-border/40" />
+          <div className="my-3 border-b border-border/20" />
         </div>
       ))}
     </div>

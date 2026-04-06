@@ -155,7 +155,7 @@ export function ClientProfileForm({
             />
           </div>
           <div className="md:col-span-2">
-            <SubmitButton className="bg-brand text-primary-foreground">
+            <SubmitButton variant="brand">
               {t.clients.profile.submit}
             </SubmitButton>
           </div>

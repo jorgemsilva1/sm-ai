@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { BUSINESS_TAGS } from "@/lib/clients/business-tags";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ClientProfileForm } from "@/components/clients/client-profile-form";
 import { ClientTagsForm } from "@/components/clients/client-tags-form";
 import { cookies } from "next/headers";
@@ -50,35 +52,36 @@ export default async function ClientPage({ params }: ClientPageProps) {
     .filter((label): label is string => Boolean(label));
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-semibold">{client.name}</h1>
-          <p className="text-sm text-muted-foreground">{t.clients.subtitle}</p>
-          {client.description ? (
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              {client.description}
-            </p>
-          ) : null}
-          {tagLabels.length ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {tagLabels.map((label) => (
-                <span
-                  key={label}
-                  className="rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs text-muted-foreground"
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
-          ) : null}
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Avatar className="size-14 shadow-md ring-2 ring-border/20">
+            {client.photo_url ? <AvatarImage src={client.photo_url} alt={client.name} /> : null}
+            <AvatarFallback className="bg-surface-2 text-lg font-bold">
+              {client.name.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">{client.name}</h1>
+            <p className="text-sm text-muted-foreground">{t.clients.subtitle}</p>
+          </div>
         </div>
-        <Button asChild variant="ghost">
+        <Button asChild variant="ghost" size="sm">
           <Link href="/dashboard/clients">
             {t.common.backToClients}
           </Link>
         </Button>
       </div>
+
+      {tagLabels.length ? (
+        <div className="flex flex-wrap gap-2">
+          {tagLabels.map((label) => (
+            <Badge key={label} variant="secondary" className="border-border/20 bg-surface-2 text-muted-foreground">
+              {label}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <ClientTagsForm
