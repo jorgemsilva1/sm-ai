@@ -146,6 +146,32 @@
   opacity: 0.92;
 }
 
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-scheduled {
+  border-left: 3px solid oklch(0.65 0.15 250);
+  background: color-mix(in oklab, oklch(0.65 0.15 250) 18%, transparent);
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-publishing {
+  border-left: 3px solid oklch(0.7 0.15 85);
+  background: color-mix(in oklab, oklch(0.7 0.15 85) 18%, transparent);
+  animation: pulse 1.5s infinite;
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-published {
+  border-left: 3px solid oklch(0.65 0.18 145);
+  background: color-mix(in oklab, oklch(0.65 0.18 145) 18%, transparent);
+}
+
+.sm-rbc .rbc-event.sm-rbc-event.sm-rbc-event-failed {
+  border-left: 3px solid oklch(0.65 0.2 25);
+  background: color-mix(in oklab, oklch(0.65 0.2 25) 18%, transparent);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .sm-rbc .rbc-event:hover,
 .sm-rbc .rbc-background-event:hover {
   background: color-mix(in oklab, var(--brand) 26%, transparent);

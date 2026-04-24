@@ -9,25 +9,7 @@ export const ScheduleAssetSchema = z.object({
 export const ScheduleRationalePointSchema = z.object({
   reason: z.string().min(1),
   strategyReference: z.object({
-    field: z.enum([
-      "objectives",
-      "audience",
-      "tone",
-      "brand_values",
-      "key_messages",
-      "content_pillars",
-      "formats",
-      "channels",
-      "cadence",
-      "kpis",
-      "guardrails",
-      "competitors",
-      "reference_folders",
-      "previous_plannings",
-      "holidays",
-      "timing",
-      "client_settings",
-    ]),
+    field: z.string().min(1),
     snippet: z.string().min(1),
   }),
 });
@@ -40,11 +22,12 @@ export const ScheduleProposedItemSchema = z.object({
   platform: z
     .enum(["instagram", "tiktok", "facebook", "linkedin", "x", "youtube", "blog"])
     .describe("Target platform"),
-  format: z.enum(["post", "reel", "story", "carousel", "short", "video", "thread"]),
+  format: z.string().min(1),
   title: z.string().min(1),
   caption: z.string().min(1),
   assets: z.array(ScheduleAssetSchema).min(1),
   rationale: z.array(ScheduleRationalePointSchema).min(1),
+  content_group: z.string().nullable().optional().describe("If this content is cross-posted to another platform, use the same group ID (e.g. 'group-1'). Null if unique to this platform."),
 });
 
 export const ScheduleProposalSchema = z.object({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DayPicker } from "react-day-picker";
 import { format } from "date-fns";
 import pt from "date-fns/locale/pt";
@@ -8,13 +8,14 @@ import enUS from "date-fns/locale/en-US";
 import { CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { copy, Locale } from "@/lib/i18n";
 import { SchedulePostDetailModal } from "@/components/clients/schedule-post-detail-modal";
 import {
   acceptScheduleItem,
-  generateScheduleDraft,
+  initScheduleDraft,
+  generateScheduleDraftPost,
   retryScheduleItem,
-  type ScheduleDraftActionState,
 } from "@/app/(app)/dashboard/clients/actions";
 
 type StrategyOption = { id: string; title: string; is_active?: boolean | null };
@@ -41,9 +42,10 @@ type SuggestedPost = {
     strategyReference: { field: string; snippet: string } | string | null;
   }[];
   status: "suggested" | "accepted" | "retrying";
+  contentGroup?: string | null;
 };
 
-type Step = "setup" | "thinking" | "review";
+type Step = "setup" | "thinking" | "generating" | "review";
 
 function addDays(date: Date, amount: number) {
   const next = new Date(date);
@@ -214,12 +216,15 @@ export function ScheduleGeneratorModal({
   const [posts, setPosts] = useState<SuggestedPost[]>([]);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
   const [draftId, setDraftId] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [generatingDone, setGeneratingDone] = useState(0);
+  const [generatingTotal, setGeneratingTotal] = useState(0);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [, startTransition] = useTransition();
 
-  const [genState, genAction] = useActionState<ScheduleDraftActionState, FormData>(
-    generateScheduleDraft.bind(null, clientId),
-    {}
-  );
+  const [retryFeedbackPostId, setRetryFeedbackPostId] = useState<string | null>(null);
+  const [retryFeedback, setRetryFeedback] = useState("");
+  const [retryNewFormat, setRetryNewFormat] = useState("");
 
   // set default strategy when opening
   useEffect(() => {
@@ -238,39 +243,22 @@ export function ScheduleGeneratorModal({
     setPosts([]);
     setDetailPostId(null);
     setDraftId(null);
+    setGeneratingDone(0);
+    setGeneratingTotal(0);
+    setSetupError(null);
+    setIsRunning(false);
   };
 
   const canConfirm =
     Boolean(strategyId) && Boolean(startDate) && Boolean(endDate) && startDate <= endDate;
 
-  useEffect(() => {
-    if (!open) return;
-    if (!genState?.draftId || !genState?.items?.length) return;
-
-    setDraftId(genState.draftId);
-    const nextPosts: SuggestedPost[] = genState.items.map((row) => ({
-      id: row.id,
-      platform: row.platform,
-      format: row.format,
-      scheduledAtISO: row.scheduled_at,
-      scheduledAtLabel: labelFromISO(locale, row.scheduled_at),
-      title: row.title,
-      caption: row.caption,
-      assets: normalizeAssets(row.assets),
-      rationale: normalizeRationale(row.rationale),
-      status: row.status === "accepted" ? "accepted" : "suggested",
-    }));
-    setPosts(nextPosts);
-    setStep("review");
-  }, [genState?.draftId, genState?.items, locale, open]);
-
   const confirmAndRun = async () => {
-    if (!canConfirm) return;
+    if (!canConfirm || isRunning) return;
+    setIsRunning(true);
     setStep("thinking");
+    setSetupError(null);
     setDetailPostId(null);
-
-    // Garantir ~3s de “thinking” mesmo que a resposta venha rápido
-    const minDelay = new Promise((r) => setTimeout(r, 3000));
+    setPosts([]);
 
     const fd = new FormData();
     fd.set("locale", locale);
@@ -280,9 +268,70 @@ export function ScheduleGeneratorModal({
     fd.set("end_date", toDateOnly(endDate));
     fd.set("timezone", timezone || "Europe/Lisbon");
 
-    startTransition(async () => {
-      await Promise.all([minDelay, genAction(fd) as any]);
-    });
+    try {
+      const initResult = await initScheduleDraft(clientId, {}, fd);
+      if (initResult.error || !initResult.draftId || !initResult.slots?.length) {
+        setSetupError(initResult.error ?? "Unknown error");
+        setStep("setup");
+        return;
+      }
+
+      const { draftId: newDraftId, slots } = initResult;
+      setDraftId(newDraftId);
+      setGeneratingTotal(slots.length);
+      setGeneratingDone(0);
+      setStep("generating");
+
+      // Collect posts in a local array (single JS thread = no race conditions on the array)
+      // then setPosts once authoritatively before switching to review.
+      const collected: SuggestedPost[] = [];
+      const postErrors: string[] = [];
+
+      await Promise.all(
+        slots.map(async (slot) => {
+          try {
+            const res = await generateScheduleDraftPost(newDraftId, clientId, locale as "pt" | "en", slot);
+            if (res.item) {
+              const row = res.item;
+              const post: SuggestedPost = {
+                id: row.id,
+                platform: row.platform,
+                format: row.format,
+                scheduledAtISO: row.scheduled_at,
+                scheduledAtLabel: labelFromISO(locale, row.scheduled_at),
+                title: row.title,
+                caption: row.caption,
+                assets: normalizeAssets(row.assets),
+                rationale: normalizeRationale(row.rationale),
+                status: row.status === "accepted" ? "accepted" : "suggested",
+                contentGroup: (row as any).content_group ?? null,
+              };
+              collected.push(post);
+              // Show progress in the generating step
+              setPosts([...collected]);
+            } else if (res.error) {
+              postErrors.push(`${slot.platform}/${slot.format}: ${res.error}`);
+            }
+          } catch (e) {
+            postErrors.push(`${slot.platform}/${slot.format}: ${e instanceof Error ? e.message : "Unknown error"}`);
+          }
+          setGeneratingDone((n) => n + 1);
+        })
+      );
+
+      if (postErrors.length > 0 && postErrors.length === slots.length) {
+        setSetupError(`All posts failed to generate. First error: ${postErrors[0]}`);
+        setStep("setup");
+        return;
+      }
+
+      // Authoritative final set before review — avoids stale closure in concurrent render
+      setPosts([...collected]);
+
+      setStep("review");
+    } finally {
+      setIsRunning(false);
+    }
   };
 
   const acceptPost = (postId: string) => {
@@ -290,12 +339,13 @@ export function ScheduleGeneratorModal({
     startTransition(async () => {
       const res = await acceptScheduleItem(postId, clientId, locale);
       if (res?.item) {
+        const nextStatus = res.item.status as SuggestedPost["status"];
         setPosts((prev) =>
           prev.map((p) =>
             p.id === postId
               ? {
                   ...p,
-                  status: "accepted",
+                  status: nextStatus === "scheduled" ? "accepted" : nextStatus,
                   title: res.item!.title,
                   caption: res.item!.caption,
                   assets: res.item!.assets as any,
@@ -308,10 +358,13 @@ export function ScheduleGeneratorModal({
     });
   };
 
-  const retryPost = (postId: string) => {
+  const retryPost = (postId: string, options?: { userFeedback?: string; newFormat?: string }) => {
     setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, status: "retrying" } : p)));
+    setRetryFeedbackPostId(null);
+    setRetryFeedback("");
+    setRetryNewFormat("");
     startTransition(async () => {
-      const res = await retryScheduleItem(postId, clientId, locale);
+      const res = await retryScheduleItem(postId, clientId, locale, options);
       if (res?.item) {
         setPosts((prev) =>
           prev.map((p) =>
@@ -319,6 +372,7 @@ export function ScheduleGeneratorModal({
               ? {
                   ...p,
                   status: res.item!.status === "accepted" ? "accepted" : "suggested",
+                  format: res.item!.format ?? p.format,
                   title: res.item!.title,
                   caption: res.item!.caption,
                   assets: res.item!.assets as any,
@@ -366,9 +420,9 @@ export function ScheduleGeneratorModal({
                   <div className="rounded-md border border-border/40 bg-card/60 p-5">
                     <div className="text-sm font-semibold">{labels.setupTitle}</div>
                     <p className="mt-1 text-sm text-muted-foreground">{labels.setupBody}</p>
-                    {genState?.error ? (
+                    {setupError ? (
                       <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-                        {genState.error}
+                        {setupError}
                       </div>
                     ) : null}
 
@@ -424,7 +478,7 @@ export function ScheduleGeneratorModal({
                       <Button
                         type="button"
                         variant="brand"
-                        disabled={!canConfirm || isPending}
+                        disabled={!canConfirm || isRunning}
                         onClick={confirmAndRun}
                       >
                         {labels.confirm}
@@ -442,9 +496,49 @@ export function ScheduleGeneratorModal({
                   <div className="mt-2 text-xs text-muted-foreground">
                     {labels.thinkingMeta.replace("{strategy}", selectedStrategyTitle || "—")}
                   </div>
-                  {draftId ? (
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      Draft: {draftId.slice(0, 8)}…
+                </div>
+              ) : null}
+
+              {step === "generating" ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">{labels.generatingTitle}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {generatingTotal > 0
+                          ? labels.generatingProgress
+                              .replace("{done}", String(generatingDone))
+                              .replace("{total}", String(generatingTotal))
+                          : labels.generatingBody}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-brand" />
+                      {generatingTotal > 0 ? (
+                        <span className="text-xs text-muted-foreground">
+                          {Math.round((generatingDone / generatingTotal) * 100)}%
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  {posts.length > 0 ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {posts.map((post) => (
+                        <div key={post.id} className="rounded-md border border-border/40 bg-card/60 p-4 opacity-80">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {post.platform} · {post.format} · {post.scheduledAtLabel}
+                            </div>
+                            {post.contentGroup ? (
+                              <span className="rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-medium text-brand">
+                                Cross-platform
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 text-sm font-semibold">{post.title}</div>
+                          <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">{post.caption}</div>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -465,8 +559,20 @@ export function ScheduleGeneratorModal({
                   <div className="grid gap-3 md:grid-cols-2">
                     {posts.map((post) => (
                       <div key={post.id} className="rounded-md border border-border/40 bg-card/60 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          {post.platform} · {post.format} · {post.scheduledAtLabel}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {post.platform} · {post.format} · {post.scheduledAtLabel}
+                          </div>
+                          {post.contentGroup ? (
+                            <span className="rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-medium text-brand">
+                              {locale === "pt" ? "Cross-platform" : "Cross-platform"}
+                            </span>
+                          ) : null}
+                          {post.status === "accepted" ? (
+                            <span className="rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-medium text-green-400">
+                              {labels.accepted}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="mt-1 text-sm font-semibold">{post.title}</div>
                         <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">{post.caption}</div>
@@ -486,6 +592,43 @@ export function ScheduleGeneratorModal({
                           </div>
                         ) : null}
 
+                        {retryFeedbackPostId === post.id ? (
+                          <div className="mt-4 space-y-2 rounded-md border border-border/40 bg-muted/30 p-3">
+                            <Textarea
+                              rows={2}
+                              placeholder={labels.retryFeedbackPlaceholder}
+                              value={retryFeedback}
+                              onChange={(e) => setRetryFeedback(e.target.value)}
+                              className="text-sm"
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Select value={retryNewFormat} onValueChange={setRetryNewFormat}>
+                                <SelectTrigger className="h-7 w-36 text-xs">
+                                  <SelectValue placeholder={labels.retryChangeFormat} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {["post", "reel", "story", "carousel", "short", "video", "thread"].map((f) => (
+                                    <SelectItem key={f} value={f} className="text-xs">{f}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <div className="ml-auto flex items-center gap-2">
+                                <Button type="button" size="sm" variant="ghost" onClick={() => { setRetryFeedbackPostId(null); setRetryFeedback(""); setRetryNewFormat(""); }}>
+                                  {labels.retryCancel}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="brand"
+                                  onClick={() => retryPost(post.id, { userFeedback: retryFeedback || undefined, newFormat: retryNewFormat || undefined })}
+                                >
+                                  {labels.retryConfirm}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
                         <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                           <Button type="button" variant="outline" size="sm" onClick={() => setDetailPostId(post.id)}>
                             {labels.viewDetails}
@@ -498,14 +641,26 @@ export function ScheduleGeneratorModal({
                               disabled={post.status === "accepted" || post.status === "retrying"}
                               onClick={() => acceptPost(post.id)}
                             >
-                              {post.status === "accepted" ? labels.accepted : labels.accept}
+                              {post.status === "accepted"
+                                ? labels.accepted
+                                : ["instagram", "facebook", "tiktok"].includes(post.platform)
+                                  ? locale === "pt" ? "Aceitar & Agendar" : "Accept & Schedule"
+                                  : labels.accept}
                             </Button>
                             <Button
                               type="button"
                               size="sm"
                               variant="outline"
                               disabled={post.status === "retrying"}
-                              onClick={() => retryPost(post.id)}
+                              onClick={() => {
+                                if (retryFeedbackPostId === post.id) {
+                                  retryPost(post.id);
+                                } else {
+                                  setRetryFeedbackPostId(post.id);
+                                  setRetryFeedback("");
+                                  setRetryNewFormat("");
+                                }
+                              }}
                             >
                               {post.status === "retrying" ? labels.retrying : labels.retry}
                             </Button>

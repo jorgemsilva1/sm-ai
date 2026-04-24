@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { codeChallengeS256, generateCodeVerifier, generateState } from "@/lib/oauth/pkce";
+import { META_SCOPES } from "@/lib/social/config";
 
 export const runtime = "nodejs";
 
@@ -17,17 +18,9 @@ function getOAuthConfig(provider: Provider) {
     case "instagram":
     case "facebook":
       return {
-        authorizeUrl: "https://www.facebook.com/v19.0/dialog/oauth",
+        authorizeUrl: "https://www.facebook.com/v25.0/dialog/oauth",
         clientId: process.env.META_APP_ID || "",
-        scopes:
-          provider === "instagram"
-            ? [
-                "instagram_basic",
-                "pages_show_list",
-                "pages_read_engagement",
-                "instagram_manage_insights",
-              ]
-            : ["pages_show_list", "pages_read_engagement"],
+        scopes: provider === "instagram" ? [...META_SCOPES.instagram] : [...META_SCOPES.facebook],
       };
     case "tiktok":
       return {

@@ -19,10 +19,12 @@ import { SchedulePostEditorModal, type ScheduleEditorPost } from "@/components/c
 import { ScheduleCreateItemModal } from "@/components/clients/schedule-create-item-modal";
 import {
   applyScheduleItemCopyProposal,
+  cancelScheduledPost,
   deleteScheduleItem,
   generateScheduleItemAssetImage,
   generateScheduleItemAssets,
   previewRegenerateScheduleItemText,
+  publishScheduleItemNow,
   setScheduleItemStatus,
   updateScheduleItemChannel,
   updateScheduleItemDatetime,
@@ -84,6 +86,9 @@ export type CalendarEvent = RBCEvent & {
     caption?: string;
     assets?: unknown;
     rationale?: unknown;
+    publishedAt?: string | null;
+    externalUrl?: string | null;
+    failureReason?: string | null;
     holidayName?: string;
     holidayType?: string;
     countryCode?: string;
@@ -303,6 +308,7 @@ export function ClientCalendar({
             if (!r?.id || !r.scheduledAtISO || !r.platform || !r.format) return;
             if (!r.caption || !r.assets || !r.rationale) return;
             // open editor with full actions
+            const fullStatus = r.status as ScheduleEditorPost["status"];
             setEditor({
               id: r.id,
               clientId: String(r.clientId || ""),
@@ -315,7 +321,10 @@ export function ClientCalendar({
               scheduledAtISO: r.scheduledAtISO,
               title: String(r.postTitle || ""),
               caption: String(r.caption),
-              status: r.status === "accepted" ? "accepted" : "suggested",
+              status: fullStatus || "suggested",
+              publishedAt: r.publishedAt ?? null,
+              externalUrl: r.externalUrl ?? null,
+              failureReason: r.failureReason ?? null,
               assets: r.assets as unknown as ScheduleEditorPost["assets"],
               rationale: r.rationale as unknown as ScheduleEditorPost["rationale"],
               draftName: r.draftName ?? null,
@@ -346,7 +355,15 @@ export function ClientCalendar({
                 ? " sm-rbc-event-accepted"
                 : status === "suggested"
                   ? " sm-rbc-event-suggested"
-                  : "";
+                  : status === "scheduled"
+                    ? " sm-rbc-event-scheduled"
+                    : status === "publishing"
+                      ? " sm-rbc-event-publishing"
+                      : status === "published"
+                        ? " sm-rbc-event-published"
+                        : status === "failed"
+                          ? " sm-rbc-event-failed"
+                          : "";
             const byPlatform = platform ? ` sm-rbc-event-${platform}` : "";
             return { className: `${base}${byStatus}${byPlatform}` };
           }}
@@ -570,6 +587,45 @@ export function ClientCalendar({
                     caption: res.item!.caption,
                     rationale: res.item!.rationale,
                   },
+                },
+              }));
+            }
+          }}
+          onCancelSchedule={async () => {
+            const res = await cancelScheduledPost(editor.id, editor.clientId, locale);
+            if (res?.item) {
+              setEditor((prev) => (prev ? { ...prev, status: "accepted" } : prev));
+              setOverrides((prev) => ({
+                ...prev,
+                [editor.id]: {
+                  ...(prev[editor.id] ?? {}),
+                  resource: { ...(prev[editor.id]?.resource ?? {}), status: "accepted" },
+                },
+              }));
+            }
+          }}
+          onPublishNow={async () => {
+            const res = await publishScheduleItemNow(editor.id, editor.clientId, locale);
+            if (res?.item) {
+              setEditor((prev) => (prev ? { ...prev, status: res.item!.status as ScheduleEditorPost["status"] } : prev));
+              setOverrides((prev) => ({
+                ...prev,
+                [editor.id]: {
+                  ...(prev[editor.id] ?? {}),
+                  resource: { ...(prev[editor.id]?.resource ?? {}), status: res.item!.status },
+                },
+              }));
+            }
+          }}
+          onRetryPublish={async () => {
+            const res = await publishScheduleItemNow(editor.id, editor.clientId, locale);
+            if (res?.item) {
+              setEditor((prev) => (prev ? { ...prev, status: res.item!.status as ScheduleEditorPost["status"] } : prev));
+              setOverrides((prev) => ({
+                ...prev,
+                [editor.id]: {
+                  ...(prev[editor.id] ?? {}),
+                  resource: { ...(prev[editor.id]?.resource ?? {}), status: res.item!.status },
                 },
               }));
             }

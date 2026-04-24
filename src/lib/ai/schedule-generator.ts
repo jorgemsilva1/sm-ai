@@ -1,12 +1,20 @@
 import { getOpenAIClient, getOpenAIModel } from "@/lib/ai/openai";
 import {
-  ScheduleProposalSchema,
-  ScheduleSingleItemSchema,
   type ScheduleProposedItem,
   type ScheduleProposal,
 } from "@/lib/ai/schedule-schema";
 import { getContentCreatorPrompt } from "./prompts/content-creator";
 import { getBrandPrompt } from "./prompts/brand";
+import { jsonrepair } from "jsonrepair";
+
+function parseAIJson<T>(raw: string): T {
+  const clean = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  try {
+    return JSON.parse(clean) as T;
+  } catch {
+    return JSON.parse(jsonrepair(clean)) as T;
+  }
+}
 
 type StrategyForAI = {
   id: string;
@@ -93,7 +101,7 @@ type PersonaForAI = {
   demographics: string | null;
 };
 
-type GenerateScheduleInput = {
+export type GenerateScheduleInput = {
   locale: "pt" | "en";
   timezone: string;
   startDate: string; // YYYY-MM-DD
@@ -122,6 +130,8 @@ type GenerateScheduleInput = {
   optimalSlots?: string; // Formatted optimal posting slots by platform
   trendingTopics?: string; // Formatted trending topics
   clientType?: "services" | "content_creator"; // Client type to determine prompt style
+  expectedPostCount?: number; // Total posts to generate (cadence-based)
+  postsPerPlatform?: number; // Posts per platform
 };
 
 const ALL_PLATFORMS = ["instagram", "tiktok", "facebook", "linkedin", "x", "youtube", "blog"] as const;
@@ -174,9 +184,16 @@ export async function generateScheduleWithOpenAI(
     : input.locale === "pt"
     ? `Gera uma proposta de calendarização de conteúdos.
 
+REGRAS DE CADÊNCIA (SEGUIR RIGOROSAMENTE):
+- Gera EXATAMENTE ${input.expectedPostCount ?? "o número correto de"} items no total.
+- Isso significa ${input.postsPerPlatform ?? "a quantidade correta de"} items POR plataforma: ${allowedPlatforms.join(", ")}.
+- A cadência da estratégia é: "${input.strategy.cadence || "não definida"}".
+- Se um conteúdo funcionar em 2+ plataformas (ex.: um Reel que funciona no Instagram E TikTok), gera-o para AMBAS com captions/hashtags adaptadas. Conta como 1 post para a quota de cada plataforma. Usa o mesmo content_group para esses items.
+- Se content_group não for relevante (conteúdo único), usa null.
+- Distribui os posts uniformemente pelo intervalo de datas. Não os concentres todos no mesmo dia.
+
 Regras:
 - O output tem de seguir exatamente o schema JSON.
-- Distribui items entre as plataformas e formatos de forma realista.
 - Usa scheduled_at com timezone (ISO 8601).
 - Usa platform e format EXATAMENTE como as opções do schema (lowercase).
 - A estratégia é mandatória. NUNCA uses plataformas fora de: ${allowedPlatforms.join(", ")}.
@@ -219,9 +236,16 @@ ${input.strategy.reference_examples.slice(0, 10).map((ex, i) => `  ${i + 1}. [${
 - Notas adicionais: ${input.notes || ""}`
       : `Generate a social media schedule proposal.
 
+CADENCE RULES (FOLLOW STRICTLY):
+- Generate EXACTLY ${input.expectedPostCount ?? "the correct number of"} items total.
+- That means ${input.postsPerPlatform ?? "the correct number of"} items PER platform across: ${allowedPlatforms.join(", ")}.
+- The cadence from the strategy is: "${input.strategy.cadence || "not defined"}".
+- If a content piece works naturally on 2+ platforms (e.g., a Reel that works on Instagram AND TikTok), generate it for BOTH platforms with adapted captions/hashtags. This counts as 1 post for each platform's quota. Use the same content_group for those items.
+- If content_group is not relevant (unique to one platform), set it to null.
+- Distribute posts evenly across the date range. Don't cluster them all on one day.
+
 Rules:
 - Output must match the JSON schema exactly.
-- Distribute items across platforms and formats realistically.
 - Use scheduled_at with timezone (ISO 8601).
 - Use platform and format EXACTLY as the schema options (lowercase).
 - Strategy is mandatory. NEVER use platforms outside: ${allowedPlatforms.join(", ")}.
@@ -306,7 +330,7 @@ ${input.strategy.reference_examples.slice(0, 10).map((ex, i) => `  ${i + 1}. [${
                       properties: {
                         type: { type: "string", enum: ["image", "video", "carousel"] },
                         description: { type: "string" },
-                        notes: { type: ["string", "null"] },
+                        notes: { anyOf: [{ type: "string" }, { type: "null" }] },
                       },
                       required: ["type", "description", "notes"],
                     },
@@ -332,6 +356,10 @@ ${input.strategy.reference_examples.slice(0, 10).map((ex, i) => `  ${i + 1}. [${
                       required: ["reason", "strategyReference"],
                     },
                   },
+                  content_group: {
+                    anyOf: [{ type: "string" }, { type: "null" }],
+                    description: "If this content is cross-posted to another platform, use the same group ID (e.g. 'group-1'). Null if unique to this platform.",
+                  },
                 },
                 required: [
                   "scheduled_at",
@@ -341,6 +369,7 @@ ${input.strategy.reference_examples.slice(0, 10).map((ex, i) => `  ${i + 1}. [${
                   "caption",
                   "assets",
                   "rationale",
+                  "content_group",
                 ],
               },
             },
@@ -355,8 +384,108 @@ ${input.strategy.reference_examples.slice(0, 10).map((ex, i) => `  ${i + 1}. [${
   if (!text) {
     throw new Error("OpenAI returned empty output_text.");
   }
-  const parsed = JSON.parse(text);
-  return ScheduleProposalSchema.parse(parsed);
+  const parsed = parseAIJson<any>(text);
+  return parsed as ScheduleProposal;
+}
+
+// ---------- Slot planner (fast — no content, just schedule structure) ----------
+
+export type ScheduleSlot = {
+  scheduled_at: string;
+  platform: "instagram" | "tiktok" | "facebook" | "linkedin" | "x" | "youtube" | "blog";
+  format: "post" | "reel" | "story" | "carousel" | "short" | "video" | "thread";
+  content_group: string | null;
+};
+
+export async function planScheduleSlotsWithOpenAI(input: {
+  locale: "pt" | "en";
+  timezone: string;
+  startDate: string;
+  endDate: string;
+  cadence: string | null;
+  allowedPlatforms: string[];
+  allowedFormats: string[];
+  expectedPostCount: number;
+  postsPerPlatform: number;
+  optimalSlots?: string;
+}): Promise<ScheduleSlot[]> {
+  const client = getOpenAIClient();
+  const model = getOpenAIModel();
+
+  const system = input.locale === "pt"
+    ? "És um planeador de social media. Responde APENAS em JSON válido."
+    : "You are a social media planner. Respond ONLY with valid JSON.";
+
+  const user = input.locale === "pt"
+    ? `Planeia os slots de publicação para um calendário de social media.
+
+Regras:
+- Gera EXATAMENTE ${input.expectedPostCount} slots no total (${input.postsPerPlatform} por plataforma).
+- Plataformas: ${input.allowedPlatforms.join(", ")}
+- Formatos: ${input.allowedFormats.join(", ")}
+- Cadência: ${input.cadence || "3x/semana"}
+- Distribui uniformemente entre ${input.startDate} e ${input.endDate}.
+- Usa scheduled_at em ISO 8601 com timezone ${input.timezone}.
+- Usa horários realistas para cada plataforma (Instagram 9h-11h ou 18h-20h, TikTok 19h-21h, etc.).
+- Se um conteúdo fizer sentido em 2 plataformas, usa o mesmo content_group (ex: "group-1").
+- Senão, content_group = null.
+${input.optimalSlots ? `\nHorários ideais:\n${input.optimalSlots}` : ""}`
+    : `Plan the posting slots for a social media calendar.
+
+Rules:
+- Generate EXACTLY ${input.expectedPostCount} slots total (${input.postsPerPlatform} per platform).
+- Platforms: ${input.allowedPlatforms.join(", ")}
+- Formats: ${input.allowedFormats.join(", ")}
+- Cadence: ${input.cadence || "3x/week"}
+- Distribute evenly between ${input.startDate} and ${input.endDate}.
+- Use scheduled_at in ISO 8601 with timezone ${input.timezone}.
+- Use realistic times per platform (Instagram 9-11am or 6-8pm, TikTok 7-9pm, etc.).
+- If content makes sense on 2 platforms, use the same content_group (e.g. "group-1").
+- Otherwise content_group = null.
+${input.optimalSlots ? `\nOptimal times:\n${input.optimalSlots}` : ""}`;
+
+  const response = await client.responses.create({
+    model,
+    input: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0.5,
+    text: {
+      format: {
+        type: "json_schema",
+        name: "schedule_slots",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            slots: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  scheduled_at: { type: "string" },
+                  platform: { type: "string", enum: input.allowedPlatforms.length ? input.allowedPlatforms : ["instagram", "facebook", "linkedin", "x", "youtube", "tiktok", "blog"] },
+                  format: { type: "string", enum: input.allowedFormats.length ? input.allowedFormats : ["post", "reel", "story", "carousel", "short", "video", "thread"] },
+                  content_group: { anyOf: [{ type: "string" }, { type: "null" }] },
+                },
+                required: ["scheduled_at", "platform", "format", "content_group"],
+              },
+            },
+          },
+          required: ["slots"],
+        },
+      },
+    },
+  });
+
+  const text = response.output_text;
+  if (!text) throw new Error("OpenAI returned empty output for slot planning.");
+  const parsed = parseAIJson<any>(text);
+  return parsed.slots as ScheduleSlot[];
 }
 
 type RetryItemInput = {
@@ -376,6 +505,8 @@ type RetryItemInput = {
   format: "post" | "reel" | "story" | "carousel" | "short" | "video" | "thread";
   previousTitle: string;
   previousCaption: string;
+  userFeedback?: string;
+  newFormat?: "post" | "reel" | "story" | "carousel" | "short" | "video" | "thread";
 };
 
 export async function regenerateScheduleItemWithOpenAI(
@@ -383,22 +514,37 @@ export async function regenerateScheduleItemWithOpenAI(
 ): Promise<ScheduleProposedItem> {
   const client = getOpenAIClient();
   const model = getOpenAIModel();
+  const targetFormat = input.newFormat ?? input.format;
 
   const system =
     input.locale === "pt"
       ? "És um estratega de social media. Responde SEMPRE em JSON válido e APENAS JSON."
       : "You are a social media strategist. Respond ONLY with valid JSON and ONLY JSON.";
 
+  const feedbackBlockPt = input.userFeedback
+    ? `\nFeedback do utilizador: ${input.userFeedback}\n`
+    : "";
+  const feedbackBlockEn = input.userFeedback
+    ? `\nUser feedback: ${input.userFeedback}\n`
+    : "";
+  const formatChangePt = input.newFormat && input.newFormat !== input.format
+    ? `\n⚠️ Formato alterado de "${input.format}" para "${input.newFormat}". Adapta o conteúdo ao novo formato.\n`
+    : "";
+  const formatChangeEn = input.newFormat && input.newFormat !== input.format
+    ? `\n⚠️ Format changed from "${input.format}" to "${input.newFormat}". Adapt the content accordingly.\n`
+    : "";
+
   const user =
     input.locale === "pt"
       ? `Reescreve UM item de calendarização para ser uma alternativa melhor, mantendo o slot e canal.
-
+${feedbackBlockPt}${formatChangePt}
 Regras:
 - O output tem de seguir exatamente o schema JSON.
 - Mantém "scheduled_at" exatamente igual: ${input.scheduledAt}
 - Mantém "platform" exatamente igual: ${input.platform}
-- Mantém "format" exatamente igual: ${input.format}
+- Usa "format" exatamente: ${targetFormat}
 - Deve ser significativamente diferente (ângulo, hook, estrutura), mas coerente com a estratégia.
+- Se houver feedback do utilizador, é OBRIGATÓRIO aplicá-lo.
 
 Estratégia: ${JSON.stringify(input.strategy)}
 Persona: ${JSON.stringify(input.persona ?? null)}
@@ -407,13 +553,14 @@ Item anterior:
 Título: ${input.previousTitle}
 Caption: ${input.previousCaption}`
       : `Rewrite ONE schedule item as a stronger alternative while preserving slot and channel.
-
+${feedbackBlockEn}${formatChangeEn}
 Rules:
 - Output must match the JSON schema exactly.
 - Keep "scheduled_at" exactly: ${input.scheduledAt}
 - Keep "platform" exactly: ${input.platform}
-- Keep "format" exactly: ${input.format}
+- Use "format" exactly: ${targetFormat}
 - Make it meaningfully different (angle, hook, structure) but consistent with the strategy.
+- If user feedback is provided, you MUST apply it.
 
 Strategy: ${JSON.stringify(input.strategy)}
 Persona: ${JSON.stringify(input.persona ?? null)}
@@ -445,11 +592,11 @@ Caption: ${input.previousCaption}`;
                 scheduled_at: { type: "string", format: "date-time" },
                 platform: {
                   type: "string",
-                  enum: [input.platform],
+                  enum: [input.platform].filter(Boolean),
                 },
                 format: {
                   type: "string",
-                  enum: [input.format],
+                  enum: [targetFormat].filter(Boolean),
                 },
                 title: { type: "string" },
                 caption: { type: "string" },
@@ -462,7 +609,7 @@ Caption: ${input.previousCaption}`;
                     properties: {
                       type: { type: "string", enum: ["image", "video", "carousel"] },
                       description: { type: "string" },
-                      notes: { type: ["string", "null"] },
+                      notes: { anyOf: [{ type: "string" }, { type: "null" }] },
                     },
                     required: ["type", "description", "notes"],
                   },
@@ -510,9 +657,8 @@ Caption: ${input.previousCaption}`;
   if (!text) {
     throw new Error("OpenAI returned empty output_text.");
   }
-  const parsed = JSON.parse(text);
-  const validated = ScheduleSingleItemSchema.parse(parsed);
-  return validated.item;
+  const parsed = parseAIJson<any>(text);
+  return (parsed as { item: ScheduleProposedItem }).item;
 }
 
 type GenerateOneItemInput = {
@@ -616,8 +762,8 @@ ${input.userPrompt}`;
               additionalProperties: false,
               properties: {
                 scheduled_at: { type: "string", format: "date-time" },
-                platform: { type: "string", enum: [input.platform] },
-                format: { type: "string", enum: [input.format] },
+                platform: { type: "string", enum: [input.platform].filter(Boolean) },
+                format: { type: "string", enum: [input.format].filter(Boolean) },
                 title: { type: "string" },
                 caption: { type: "string" },
                 assets: {
@@ -629,7 +775,7 @@ ${input.userPrompt}`;
                     properties: {
                       type: { type: "string", enum: ["image", "video", "carousel"] },
                       description: { type: "string" },
-                      notes: { type: ["string", "null"] },
+                      notes: { anyOf: [{ type: "string" }, { type: "null" }] },
                     },
                     required: ["type", "description", "notes"],
                   },
@@ -667,9 +813,8 @@ ${input.userPrompt}`;
 
   const text = response.output_text;
   if (!text) throw new Error("OpenAI returned empty output_text.");
-  const parsed = JSON.parse(text);
-  const validated = ScheduleSingleItemSchema.parse(parsed);
-  return validated.item;
+  const parsed = parseAIJson<any>(text);
+  return (parsed as { item: ScheduleProposedItem }).item;
 }
 
 
@@ -740,7 +885,7 @@ Persona: ${JSON.stringify(input.persona ?? null)}`;
                 properties: {
                   type: { type: "string", enum: ["image", "video", "carousel"] },
                   description: { type: "string" },
-                  notes: { type: ["string", "null"] },
+                  notes: { anyOf: [{ type: "string" }, { type: "null" }] },
                 },
                 required: ["type", "description", "notes"],
               },
@@ -754,7 +899,7 @@ Persona: ${JSON.stringify(input.persona ?? null)}`;
 
   const text = response.output_text;
   if (!text) throw new Error("OpenAI returned empty output_text.");
-  const parsed = JSON.parse(text);
+  const parsed = parseAIJson<any>(text);
   const assets = Array.isArray(parsed?.assets) ? parsed.assets : [];
   return assets as Array<{ type: "image" | "video" | "carousel"; description: string; notes: string | null }>;
 }
@@ -869,7 +1014,7 @@ Persona: ${JSON.stringify(input.persona ?? null)}`;
 
   const text = response.output_text;
   if (!text) throw new Error("OpenAI returned empty output_text.");
-  const parsed = JSON.parse(text);
+  const parsed = parseAIJson<any>(text);
   return { title: parsed.title, caption: parsed.caption, rationale: parsed.rationale };
 }
 

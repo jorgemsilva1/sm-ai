@@ -161,3 +161,51 @@ export function extractCompetitorInsights(
     competitorNames,
   };
 }
+
+/**
+ * Format competitor insights as a structured, actionable narrative for AI prompts.
+ * More readable than raw arrays — surfaces the most important signals prominently.
+ */
+export function formatCompetitorInsightsForPrompt(
+  insights: CompetitorInsights,
+  locale: "pt" | "en"
+): string {
+  const sections: string[] = [];
+
+  if (insights.insights.whitespaceOpportunities.length > 0) {
+    sections.push(locale === "pt"
+      ? `OPORTUNIDADES NÃO EXPLORADAS (prioriza no conteúdo):\n${insights.insights.whitespaceOpportunities.slice(0, 5).map((o, i) => `  ${i + 1}. ${o}`).join("\n")}`
+      : `UNEXPLOITED OPPORTUNITIES (prioritize in content):\n${insights.insights.whitespaceOpportunities.slice(0, 5).map((o, i) => `  ${i + 1}. ${o}`).join("\n")}`
+    );
+  }
+
+  if (insights.insights.counterAngles.length > 0) {
+    sections.push(locale === "pt"
+      ? `ÂNGULOS DE DIFERENCIAÇÃO (usa pelo menos 1):\n${insights.insights.counterAngles.slice(0, 5).map((a, i) => `  ${i + 1}. ${a}`).join("\n")}`
+      : `DIFFERENTIATION ANGLES (use at least 1):\n${insights.insights.counterAngles.slice(0, 5).map((a, i) => `  ${i + 1}. ${a}`).join("\n")}`
+    );
+  }
+
+  if (insights.insights.hooks.length > 0) {
+    sections.push(locale === "pt"
+      ? `HOOKS EFICAZES (adapta para o cliente): ${insights.insights.hooks.slice(0, 5).join(", ")}`
+      : `EFFECTIVE HOOKS (adapt for client): ${insights.insights.hooks.slice(0, 5).join(", ")}`
+    );
+  }
+
+  if (insights.insights.whatToAvoid.length > 0) {
+    sections.push(locale === "pt"
+      ? `O QUE EVITAR (não repitas erros dos competidores): ${insights.insights.whatToAvoid.slice(0, 5).join(", ")}`
+      : `WHAT TO AVOID (don't repeat competitor mistakes): ${insights.insights.whatToAvoid.slice(0, 5).join(", ")}`
+    );
+  }
+
+  if (insights.insights.contentThemes.length > 0) {
+    sections.push(locale === "pt"
+      ? `TEMAS COMUNS DOS COMPETIDORES (para contexto, não copiar): ${insights.insights.contentThemes.slice(0, 8).join(", ")}`
+      : `COMPETITOR CONTENT THEMES (for context, don't copy): ${insights.insights.contentThemes.slice(0, 8).join(", ")}`
+    );
+  }
+
+  return sections.join("\n\n");
+}

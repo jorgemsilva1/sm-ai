@@ -22,7 +22,7 @@ export async function buildCompetitorProfileWithOpenAI(input: {
     title: p.title,
     description: p.description,
     contentType: p.contentType,
-    text: p.text ? String(p.text).slice(0, 6000) : null,
+    text: p.text ? String(p.text).slice(0, 10000) : null,
   }));
 
   const user =
@@ -1077,7 +1077,7 @@ export async function regenerateCompetitorSectionWithOpenAI(input: {
     title: p.title,
     description: p.description,
     contentType: p.contentType,
-    text: p.text ? String(p.text).slice(0, 6000) : null,
+    text: p.text ? String(p.text).slice(0, 10000) : null,
   }));
 
   // Build schema for just this section

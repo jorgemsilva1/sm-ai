@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { copy, type Locale } from "@/lib/i18n";
+import { type Locale } from "@/lib/i18n";
 import { disconnectClientSocialAccount } from "@/app/(app)/dashboard/clients/actions";
 
 type Provider = "instagram" | "facebook" | "tiktok" | "linkedin" | "youtube" | "x";
@@ -29,6 +29,7 @@ export type ClientSocialAccount = {
   profile_url: string | null;
   scopes: string[] | null;
   expires_at: string | null;
+  token_status: "active" | "expiring_soon" | "expired" | "revoked" | null;
   created_at: string;
 };
 
@@ -40,6 +41,48 @@ const PROVIDERS: Array<{ key: Provider; title: string; hint: string }> = [
   { key: "youtube", title: "YouTube (Google)", hint: "Google OAuth 2.0 + YouTube scopes." },
   { key: "x", title: "X (Twitter)", hint: "X OAuth 2.0 (PKCE)." },
 ];
+
+function TokenStatusBadge({
+  status,
+  locale,
+}: {
+  status: ClientSocialAccount["token_status"];
+  locale: Locale;
+}) {
+  if (!status || status === "active") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+        {locale === "pt" ? "Ativo" : "Active"}
+      </span>
+    );
+  }
+  if (status === "expiring_soon") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/15 px-2 py-0.5 text-xs font-medium text-yellow-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-yellow-400" />
+        {locale === "pt" ? "Expira em breve" : "Expiring soon"}
+      </span>
+    );
+  }
+  if (status === "expired") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
+        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        {locale === "pt" ? "Expirado — reconectar" : "Expired — reconnect"}
+      </span>
+    );
+  }
+  if (status === "revoked") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
+        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        {locale === "pt" ? "Acesso revogado — reconectar" : "Access revoked — reconnect"}
+      </span>
+    );
+  }
+  return null;
+}
 
 function ProviderLogo({ provider }: { provider: Provider }) {
   const cls = "h-4 w-4";
@@ -80,7 +123,6 @@ export function ClientIntegrations({
   clientId: string;
   accounts: ClientSocialAccount[];
 }) {
-  const t = copy[locale];
   const [isPending, startTransition] = useTransition();
 
   const byProvider = useMemo(() => {
@@ -128,6 +170,12 @@ export function ClientIntegrations({
                           <span className="truncate">
                             {a.display_name || a.username || a.provider_account_id || a.id}
                           </span>
+                        </div>
+                        <div className="mt-1.5">
+                          <TokenStatusBadge
+                            status={a.token_status ?? "active"}
+                            locale={locale}
+                          />
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
                           {locale === "pt" ? "Scopes:" : "Scopes:"}{" "}
@@ -180,7 +228,17 @@ export function ClientIntegrations({
               </a>
               <Button asChild type="button" variant="brand" disabled={isPending}>
                 <a href={startHref}>
-                  {connected.length ? (locale === "pt" ? "Adicionar conta" : "Add account") : locale === "pt" ? "Conectar" : "Connect"}
+                  {connected.length === 0
+                    ? locale === "pt"
+                      ? "Conectar"
+                      : "Connect"
+                    : connected.some((a) => a.token_status === "expired" || a.token_status === "revoked")
+                      ? locale === "pt"
+                        ? "Reconectar"
+                        : "Reconnect"
+                      : locale === "pt"
+                        ? "Adicionar conta"
+                        : "Add account"}
                 </a>
               </Button>
             </CardFooter>

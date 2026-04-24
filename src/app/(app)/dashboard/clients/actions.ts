@@ -10,6 +10,8 @@ import {
   regenerateTextWithOpenAI,
   generateOneScheduleItemWithOpenAI,
   regenerateScheduleItemWithOpenAI,
+  planScheduleSlotsWithOpenAI,
+  type ScheduleSlot,
 } from "@/lib/ai/schedule-generator";
 import { generateImageBase64 } from "@/lib/ai/image-generator";
 import { getOptimalPostingSlots, formatOptimalSlotsForPrompt, analyzeClientPostingPatterns } from "@/lib/ai/posting-times";
@@ -17,6 +19,7 @@ import { extractCompetitorInsights } from "@/lib/ai/competitor-insights";
 import { getTrendingTopics, formatTrendingTopicsForPrompt } from "@/lib/ai/trending-topics";
 import { buildCompetitorProfileWithOpenAI, regenerateCompetitorSectionWithOpenAI, type SectionKey } from "@/lib/ai/competitor-profiler";
 import { collectCompetitorUrls, crawlManyUrls } from "@/lib/crawler/web-crawler";
+import { inngest } from "@/inngest/client";
 
 export type ClientActionState = {
   error?: string;
@@ -52,6 +55,7 @@ const ACTION_COPY: Record<ActionLocale, Record<string, string>> = {
     competitorDeleted: "Competitor deleted.",
     scheduleDraftCreated: "Schedule draft created.",
     scheduleItemAccepted: "Post accepted.",
+    scheduleItemScheduled: "Post accepted and scheduled for publishing.",
     scheduleItemRetried: "New variation generated.",
   },
   pt: {
@@ -79,6 +83,7 @@ const ACTION_COPY: Record<ActionLocale, Record<string, string>> = {
     competitorDeleted: "Competidor eliminado.",
     scheduleDraftCreated: "Rascunho de calendarização criado.",
     scheduleItemAccepted: "Post aceite.",
+    scheduleItemScheduled: "Post aceite e agendado para publicação.",
     scheduleItemRetried: "Nova variação gerada.",
   },
 };
@@ -107,7 +112,19 @@ export type ScheduleDraftActionState = ClientActionState & {
   items?: ScheduleItemRow[];
 };
 
-type ScheduleItemStatus = "suggested" | "accepted";
+export type InitScheduleDraftState = {
+  error?: string;
+  draftId?: string;
+  strategyId?: string;
+  slots?: ScheduleSlot[];
+};
+
+export type GenerateScheduleDraftPostState = {
+  error?: string;
+  item?: ScheduleItemRow;
+};
+
+type ScheduleItemStatus = "suggested" | "accepted" | "scheduled" | "publishing" | "published" | "failed" | "cancelled";
 
 function asDateOnly(value: string) {
   const v = value.trim();
@@ -253,7 +270,11 @@ function extractAllowedFormatsFromFormats(formats: string | null) {
   if (/\b(video|vídeo)\b/.test(text)) add("video");
   if (/\b(post|publicaç)\b/.test(text)) add("post");
 
-  return Array.from(out);
+  // If nothing matched, allow all formats
+  const result = Array.from(out);
+  return result.length > 0
+    ? result
+    : (["post", "reel", "story", "carousel", "short", "video", "thread"] as const).slice() as Array<"post" | "reel" | "story" | "carousel" | "short" | "video" | "thread">;
 }
 
 async function fetchRecentPlanningsForAI(
@@ -288,6 +309,21 @@ function normalizeFormat(value: string) {
     return v;
   }
   return null;
+}
+
+function parseCadencePerWeek(cadence: string | null): number {
+  if (!cadence) return 3;
+  const raw = cadence.toLowerCase().trim();
+  const match = raw.match(/(\d+)\s*x?\s*[\/per]*\s*(week|semana|sem)/i);
+  if (match) return Math.min(parseInt(match[1], 10), 14);
+  if (/daily|diário|diaria|diariamente/.test(raw)) return 7;
+  if (/2x.*day|2x.*dia/.test(raw)) return 14;
+  if (/5x/.test(raw)) return 5;
+  if (/4x/.test(raw)) return 4;
+  if (/3x/.test(raw)) return 3;
+  if (/2x/.test(raw)) return 2;
+  if (/1x|once|uma vez/.test(raw)) return 1;
+  return 3;
 }
 
 function buildStrategyForAI(
@@ -715,6 +751,12 @@ function getStrategyPayload(formData: FormData) {
   const cadence = String(formData.get("cadence") || "").trim();
   const cadenceOther = String(formData.get("cadence_other") || "").trim();
   const cadenceValue = cadence || cadenceOther;
+  const campaignObjectives = String(formData.get("campaign_objectives") || "").trim();
+  const aiNotesRaw = String(formData.get("ai_notes") || "").trim();
+  const aiNotesValue = [
+    campaignObjectives ? `Campaign objectives: ${campaignObjectives}` : null,
+    aiNotesRaw || null,
+  ].filter(Boolean).join("\n\n") || null;
   return {
     title,
     status: String(formData.get("status") || "").trim() || null,
@@ -732,7 +774,7 @@ function getStrategyPayload(formData: FormData) {
     cadence: cadenceValue || null,
     kpis: getListValue(formData, "kpis", "kpis_other"),
     guardrails: String(formData.get("guardrails") || "").trim() || null,
-    ai_notes: String(formData.get("ai_notes") || "").trim() || null,
+    ai_notes: aiNotesValue,
   };
 }
 
@@ -1102,7 +1144,7 @@ export async function analyzeCompetitorWithAI(
     const crawl = await crawlManyUrls(urls, {
       timeoutMs: 9_000,
       maxBytes: 1_000_000,
-      maxTextChars: 12_000,
+      maxTextChars: 20_000,
       userAgent: "sm-ai-crawler/1.0 (+https://example.invalid)",
       onPageCrawled: async ({ done, total }) => {
         // 10%..60% based on crawl completion
@@ -1254,7 +1296,7 @@ export async function regenerateCompetitorAISection(
     crawl = await crawlManyUrls(urls, {
       timeoutMs: 9_000,
       maxBytes: 1_000_000,
-      maxTextChars: 12_000,
+      maxTextChars: 20_000,
       userAgent: "sm-ai-crawler/1.0 (+https://example.invalid)",
     });
   }
@@ -1468,6 +1510,13 @@ export async function generateScheduleDraft(
     reference_examples: referenceExamples.length > 0 ? referenceExamples : undefined,
   };
 
+  // Calculate expected post count from cadence
+  const postsPerWeek = parseCadencePerWeek(strategy.cadence);
+  const daysDiff = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  const weeksSpan = Math.max(1, daysDiff / 7);
+  const postsPerPlatform = Math.max(1, Math.round(postsPerWeek * weeksSpan));
+  const expectedPostCount = postsPerPlatform * allowedPlatforms.length;
+
   // Get optimal posting slots for the allowed platforms
   const optimalSlots = await getOptimalPostingSlots(clientId, allowedPlatforms, supabase);
   const optimalSlotsText = formatOptimalSlotsForPrompt(optimalSlots, aiLocale);
@@ -1511,6 +1560,8 @@ export async function generateScheduleDraft(
     optimalSlots: optimalSlotsText,
     trendingTopics: trendingTopicsText,
     clientType: (brandContext.client as any)?.client_type || "services",
+    expectedPostCount,
+    postsPerPlatform,
   });
 
   const rows = proposal.items.map((item) => ({
@@ -1525,6 +1576,7 @@ export async function generateScheduleDraft(
     caption: item.caption,
     assets: item.assets,
     rationale: item.rationale,
+    content_group: item.content_group ?? null,
     status: "suggested",
   }));
 
@@ -1548,16 +1600,309 @@ export async function generateScheduleDraft(
 
 }
 
+// ---- Two-phase incremental generation ----
+// Phase 1: Plan slots (fast AI call, returns only dates/platforms/formats)
+// Phase 2: Generate content per slot (called one at a time from the client)
+
+export async function initScheduleDraft(
+  clientId: string,
+  _prevState: InitScheduleDraftState,
+  formData: FormData
+): Promise<InitScheduleDraftState> {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Session expired." };
+
+  const locale = getActionLocale(formData) as ActionLocale;
+  const strategyId = String(formData.get("strategy_id") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const startDate = asDateOnly(String(formData.get("start_date") || "").trim());
+  const endDate = asDateOnly(String(formData.get("end_date") || "").trim());
+  const timezone = String(formData.get("timezone") || "Europe/Lisbon").trim();
+
+  if (!strategyId || !startDate || !endDate) {
+    return { error: locale === "pt" ? "Parâmetros inválidos." : "Invalid parameters." };
+  }
+
+  const { data: strategy, error: strategyError } = await supabase
+    .from("client_strategies")
+    .select("id, title, channels, formats, cadence, ai_notes, persona_id, use_celebration_dates, competitor_ids, reference_group_ids")
+    .eq("id", strategyId)
+    .eq("client_id", clientId)
+    .single<StrategyRowForAI>();
+
+  if (strategyError || !strategy) {
+    return { error: locale === "pt" ? "Estratégia não encontrada." : "Strategy not found." };
+  }
+
+  const allowedPlatforms = extractAllowedPlatformsFromChannels(strategy.channels);
+  const allowedFormats = extractAllowedFormatsFromFormats(strategy.formats);
+
+  if (allowedPlatforms.length === 0) {
+    return {
+      error: locale === "pt"
+        ? "A estratégia não tem canais definidos. Define os canais para gerar uma planificação."
+        : "Strategy has no channels defined. Define channels to generate a schedule.",
+    };
+  }
+
+  const brandContext = await fetchClientContextForAI(supabase, clientId);
+  const aiLocale: "pt" | "en" = brandContext.client?.default_locale === "en" ? "en" : "pt";
+  const effectiveTimezone = brandContext.client?.timezone || timezone;
+
+  const postsPerWeek = parseCadencePerWeek(strategy.cadence);
+  const daysDiff = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  const weeksSpan = Math.max(1, daysDiff / 7);
+  const postsPerPlatform = Math.max(1, Math.round(postsPerWeek * weeksSpan));
+  const expectedPostCount = postsPerPlatform * allowedPlatforms.length;
+
+  const optimalSlots = await getOptimalPostingSlots(clientId, allowedPlatforms, supabase);
+  const optimalSlotsText = formatOptimalSlotsForPrompt(optimalSlots, aiLocale);
+
+  const slots = await planScheduleSlotsWithOpenAI({
+    locale: aiLocale,
+    timezone: effectiveTimezone,
+    startDate,
+    endDate,
+    cadence: strategy.cadence,
+    allowedPlatforms,
+    allowedFormats,
+    expectedPostCount,
+    postsPerPlatform,
+    optimalSlots: optimalSlotsText,
+  });
+
+  const { data: draftRow, error: draftError } = await supabase
+    .from("client_schedule_drafts")
+    .insert({
+      client_id: clientId,
+      owner_id: user.id,
+      strategy_id: strategyId,
+      persona_id: strategy.persona_id ?? null,
+      name: name || null,
+      start_date: startDate,
+      end_date: endDate,
+      timezone: effectiveTimezone,
+      status: "draft",
+    })
+    .select("id")
+    .single();
+
+  if (draftError || !draftRow) {
+    return { error: draftError?.message || "Failed to create draft." };
+  }
+
+  return { draftId: draftRow.id, strategyId, slots };
+}
+
+export async function generateScheduleDraftPost(
+  draftId: string,
+  clientId: string,
+  locale: ActionLocale,
+  slot: ScheduleSlot
+): Promise<GenerateScheduleDraftPostState> {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Session expired." };
+
+  const { data: draft, error: draftError } = await supabase
+    .from("client_schedule_drafts")
+    .select("id, strategy_id, persona_id, timezone")
+    .eq("id", draftId)
+    .single();
+  if (draftError || !draft) return { error: "Draft not found." };
+
+  const { data: strategy, error: strategyError } = await supabase
+    .from("client_strategies")
+    .select("id, title, status, objectives, audience, positioning, key_messages, content_pillars, formats, channels, cadence, kpis, guardrails, ai_notes, competitor_ids, reference_group_ids, persona_id, use_celebration_dates")
+    .eq("id", draft.strategy_id)
+    .eq("client_id", clientId)
+    .single<StrategyRowForAI>();
+  if (strategyError || !strategy) return { error: "Strategy not found." };
+
+  const competitorIds = strategy.competitor_ids;
+  const competitorDetails: CompetitorRowForAI[] = competitorIds?.length
+    ? (
+        (
+          await supabase
+            .from("client_competitors")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
+            .eq("client_id", clientId)
+            .in("id", competitorIds)
+        ).data ?? []
+      ) as CompetitorRowForAI[]
+    : [];
+
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
+
+  const referenceGroupIds = strategy.reference_group_ids;
+  const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
+    ? (
+        (
+          await supabase
+            .from("client_reference_groups")
+            .select("id, name, description")
+            .eq("client_id", clientId)
+            .in("id", referenceGroupIds)
+        ).data ?? []
+      ) as ReferenceGroupRowForAI[]
+    : [];
+
+  const referenceExamples: Array<{ title: string; description?: string | null; group_name: string }> = referenceGroupIds?.length
+    ? (
+        (
+          await supabase
+            .from("client_reference_items")
+            .select("title, description, client_reference_groups(name)")
+            .eq("client_id", clientId)
+            .in("group_id", referenceGroupIds)
+            .order("created_at", { ascending: false })
+            .limit(10)
+        ).data?.map((item: any) => ({
+          title: item.title || "",
+          description: item.description,
+          group_name: item.client_reference_groups?.name || "",
+        })) ?? []
+      )
+    : [];
+
+  const brandContext = await fetchClientContextForAI(supabase, clientId);
+  const aiLocale: "pt" | "en" = brandContext.client?.default_locale === "en" ? "en" : "pt";
+  const effectiveTimezone = String(draft.timezone || brandContext.client?.timezone || "Europe/Lisbon");
+
+  const strategyForAI = {
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
+    client: brandContext.client ?? undefined,
+    editorial_profile: brandContext.editorial_profile ?? undefined,
+    business_tags: brandContext.business_tags,
+    reference_examples: referenceExamples.length > 0 ? referenceExamples : undefined,
+  };
+
+  const personaId = draft.persona_id ?? strategy.persona_id ?? null;
+  const persona: PersonaRowForAI | null = personaId
+    ? (
+        (
+          await supabase
+            .from("client_personas")
+            .select("id, name, role_title, age_range, gender, location, goals, pain_points, motivations, channels, content_preferences, objections, notes, style_preferences, demographics")
+            .eq("client_id", clientId)
+            .eq("id", personaId)
+            .maybeSingle()
+        ).data ?? null
+      )
+    : null;
+
+  const recentPlannings = await fetchRecentPlanningsForAI(supabase, clientId, 75, 30);
+  const countryCode = (brandContext.client?.country_code || "PT").toUpperCase();
+  const holidays = getHolidaysInRange(countryCode, slot.scheduled_at.slice(0, 10), slot.scheduled_at.slice(0, 10), Boolean(strategy.use_celebration_dates));
+
+  const generated = await generateOneScheduleItemWithOpenAI({
+    locale: aiLocale,
+    timezone: effectiveTimezone,
+    strategy: strategyForAI,
+    persona: persona ?? undefined,
+    scheduledAt: slot.scheduled_at,
+    platform: slot.platform,
+    format: slot.format,
+    userPrompt: strategy.ai_notes
+      ? (aiLocale === "pt" ? `Brief de campanha: ${strategy.ai_notes}` : `Campaign brief: ${strategy.ai_notes}`)
+      : "",
+    recentPlannings,
+    holidays,
+  });
+
+  const baseInsert = {
+    draft_id: draftId,
+    client_id: clientId,
+    owner_id: user.id,
+    strategy_id: draft.strategy_id,
+    // Use slot values as source of truth for structural fields — the AI may omit them
+    scheduled_at: generated.scheduled_at || slot.scheduled_at,
+    platform: generated.platform || slot.platform,
+    format: generated.format || slot.format || "post",
+    title: generated.title,
+    caption: generated.caption,
+    assets: generated.assets,
+    rationale: generated.rationale,
+    status: "suggested",
+  };
+
+  // Try with content_group first; fall back without it if the column doesn't exist yet
+  let itemRow: unknown = null;
+  let insertError: { message: string } | null = null;
+
+  const withGroup = await supabase
+    .from("client_schedule_items")
+    .insert({ ...baseInsert, content_group: slot.content_group ?? null })
+    .select("id, draft_id, scheduled_at, platform, format, title, caption, assets, rationale, status, retry_count, content_group")
+    .single();
+
+  if (withGroup.error) {
+    // Column may not exist yet — retry without it
+    const withoutGroup = await supabase
+      .from("client_schedule_items")
+      .insert(baseInsert)
+      .select("id, draft_id, scheduled_at, platform, format, title, caption, assets, rationale, status, retry_count")
+      .single();
+    itemRow = withoutGroup.data;
+    insertError = withoutGroup.error;
+  } else {
+    itemRow = withGroup.data;
+  }
+
+  if (insertError || !itemRow) return { error: (insertError?.message) ?? "Insert failed." };
+
+  return { item: itemRow as unknown as ScheduleItemRow };
+}
+
 export async function acceptScheduleItem(
   itemId: string,
   clientId: string,
   locale: ActionLocale
-): Promise<{ error?: string; success?: string; item?: ScheduleItemRow }> {
+): Promise<{ error?: string; success?: string; scheduled?: boolean; item?: ScheduleItemRow }> {
   const t = ACTION_COPY[locale];
   const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: t.sessionExpired };
+
+  // First fetch the item to know its platform and scheduled_at
+  const { data: item, error: fetchError } = await supabase
+    .from("client_schedule_items")
+    .select("id, draft_id, scheduled_at, platform, format, title, caption, assets, rationale, status, retry_count")
+    .eq("id", itemId)
+    .single();
+  if (fetchError || !item) return { error: fetchError?.message || "Item not found." };
+
+  // Check for active social account for this platform
+  const { data: accounts } = await supabase
+    .from("client_social_accounts")
+    .select("id, provider, token_status")
+    .eq("client_id", clientId)
+    .eq("provider", item.platform)
+    .eq("token_status", "active");
+
+  const hasActiveAccount = accounts && accounts.length > 0;
+  const scheduledAt = new Date(item.scheduled_at);
+  const isInFuture = scheduledAt > new Date();
+
+  let newStatus: ScheduleItemStatus = "accepted";
+  let socialAccountId: string | null = null;
+
+  if (hasActiveAccount && isInFuture) {
+    newStatus = "scheduled";
+    socialAccountId = accounts[0].id;
+  }
+
   const { error, data } = await supabase
     .from("client_schedule_items")
-    .update({ status: "accepted" })
+    .update({ status: newStatus, ...(socialAccountId ? { social_account_id: socialAccountId } : {}) })
     .eq("id", itemId)
     .select(
       "id, draft_id, scheduled_at, platform, format, title, caption, assets, rationale, status, retry_count"
@@ -1566,12 +1911,35 @@ export async function acceptScheduleItem(
 
   if (error) return { error: error.message };
 
-  // Analyze posting patterns in background (don't block the response)
-  if (data) {
-    analyzeClientPostingPatterns(clientId, supabase).catch((err) => {
-      console.error("Failed to analyze posting patterns:", err);
+  // Fire Inngest event if scheduled
+  if (newStatus === "scheduled" && socialAccountId) {
+    await inngest.send({
+      name: "post/schedule.created",
+      data: {
+        postId: itemId,
+        clientId,
+        ownerId: user.id,
+        platform: item.platform,
+        scheduledAt: item.scheduled_at,
+        socialAccountId,
+      },
     });
   }
+
+  // Log activity
+  await supabase.from("activity_logs").insert({
+    client_id: clientId,
+    owner_id: user.id,
+    action: "accepted",
+    entity_type: "schedule_item",
+    entity_id: itemId,
+    details: { platform: item.platform, scheduled: newStatus === "scheduled" },
+  });
+
+  // Analyze posting patterns in background (don't block the response)
+  analyzeClientPostingPatterns(clientId, supabase).catch((err) => {
+    console.error("Failed to analyze posting patterns:", err);
+  });
 
   // Se não existir mais nenhum item "suggested" neste draft, marcamos o draft como "published".
   if (data?.draft_id) {
@@ -1579,7 +1947,7 @@ export async function acceptScheduleItem(
       .from("client_schedule_items")
       .select("id", { count: "exact", head: true })
       .eq("draft_id", data.draft_id)
-      .neq("status", "accepted");
+      .not("status", "in", '("accepted","scheduled","publishing","published")');
 
     if ((count ?? 0) === 0) {
       await supabase
@@ -1590,13 +1958,125 @@ export async function acceptScheduleItem(
   }
 
   revalidatePath(`/dashboard/clients/${clientId}/calendar`);
-  return { success: t.scheduleItemAccepted, item: data as unknown as ScheduleItemRow };
+  return {
+    success: newStatus === "scheduled" ? t.scheduleItemScheduled ?? t.scheduleItemAccepted : t.scheduleItemAccepted,
+    scheduled: newStatus === "scheduled",
+    item: data as unknown as ScheduleItemRow,
+  };
+}
+
+export async function publishScheduleItemNow(
+  itemId: string,
+  clientId: string,
+  locale: ActionLocale
+): Promise<{ error?: string; success?: string; item?: ScheduleItemRow }> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: ACTION_COPY[locale].sessionExpired };
+
+  const { data: item, error: fetchError } = await supabase
+    .from("client_schedule_items")
+    .select("id, platform, scheduled_at, social_account_id, status")
+    .eq("id", itemId)
+    .single();
+  if (fetchError || !item) return { error: fetchError?.message || "Item not found." };
+
+  // Find active social account if not already linked
+  let socialAccountId = item.social_account_id as string | null;
+  if (!socialAccountId) {
+    const { data: accounts } = await supabase
+      .from("client_social_accounts")
+      .select("id")
+      .eq("client_id", clientId)
+      .eq("provider", item.platform)
+      .eq("token_status", "active")
+      .limit(1);
+    socialAccountId = accounts?.[0]?.id ?? null;
+  }
+  if (!socialAccountId) {
+    return { error: locale === "pt" ? "Conta social não encontrada." : "No active social account found." };
+  }
+
+  // Schedule for immediate publish (set scheduled_at to now)
+  const now = new Date().toISOString();
+  const { error, data } = await supabase
+    .from("client_schedule_items")
+    .update({ status: "scheduled", social_account_id: socialAccountId, scheduled_at: now })
+    .eq("id", itemId)
+    .select("id, draft_id, scheduled_at, platform, format, title, caption, assets, rationale, status, retry_count")
+    .single();
+  if (error) return { error: error.message };
+
+  await inngest.send({
+    name: "post/publish.execute",
+    data: {
+      postId: itemId,
+      clientId,
+      ownerId: user.id,
+      platform: item.platform,
+      socialAccountId,
+    },
+  });
+
+  await supabase.from("activity_logs").insert({
+    client_id: clientId,
+    owner_id: user.id,
+    action: "scheduled",
+    entity_type: "schedule_item",
+    entity_id: itemId,
+    details: { platform: item.platform, immediate: true },
+  });
+
+  revalidatePath(`/dashboard/clients/${clientId}/calendar`);
+  return {
+    success: locale === "pt" ? "Post agendado para publicação imediata." : "Post queued for immediate publish.",
+    item: data as unknown as ScheduleItemRow,
+  };
+}
+
+export async function cancelScheduledPost(
+  itemId: string,
+  clientId: string,
+  locale: ActionLocale
+): Promise<{ error?: string; success?: string; item?: ScheduleItemRow }> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { error, data } = await supabase
+    .from("client_schedule_items")
+    .update({ status: "accepted", publish_job_id: null })
+    .eq("id", itemId)
+    .select("id, draft_id, scheduled_at, platform, format, title, caption, assets, rationale, status, retry_count")
+    .single();
+  if (error) return { error: error.message };
+
+  if (user) {
+    await supabase.from("activity_logs").insert({
+      client_id: clientId,
+      owner_id: user.id,
+      action: "cancelled",
+      entity_type: "schedule_item",
+      entity_id: itemId,
+      details: { platform: (data as unknown as Record<string, unknown>)?.platform },
+    });
+  }
+
+  revalidatePath(`/dashboard/clients/${clientId}/calendar`);
+  return {
+    success: locale === "pt" ? "Agendamento cancelado." : "Scheduling cancelled.",
+    item: data as unknown as ScheduleItemRow,
+  };
 }
 
 export async function retryScheduleItem(
   itemId: string,
   clientId: string,
-  locale: ActionLocale
+  locale: ActionLocale,
+  options?: { userFeedback?: string; newFormat?: string }
 ): Promise<{ error?: string; success?: string; item?: ScheduleItemRow }> {
   const t = ACTION_COPY[locale];
   const supabase = await createSupabaseServerClient();
@@ -1638,12 +2118,19 @@ export async function retryScheduleItem(
         (
           await supabase
             .from("client_competitors")
-            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
             .eq("client_id", clientId)
             .in("id", competitorIds)
         ).data ?? []
       ) as CompetitorRowForAI[]
     : [];
+
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
 
   const referenceGroupIds = strategy.reference_group_ids;
   const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
@@ -1658,13 +2145,33 @@ export async function retryScheduleItem(
       ) as ReferenceGroupRowForAI[]
     : [];
 
+  // Fetch reference items examples (titles/captions) from selected folders
+  const referenceExamples: Array<{ title: string; description?: string | null; group_name: string }> = referenceGroupIds?.length
+    ? (
+        (
+          await supabase
+            .from("client_reference_items")
+            .select("title, description, client_reference_groups(name)")
+            .eq("client_id", clientId)
+            .in("group_id", referenceGroupIds)
+            .order("created_at", { ascending: false })
+            .limit(15)
+        ).data?.map((item: any) => ({
+          title: item.title || "",
+          description: item.description,
+          group_name: item.client_reference_groups?.name || "",
+        })) ?? []
+      )
+    : [];
+
   const brandContext = await fetchClientContextForAI(supabase, clientId);
   const aiLocale: "pt" | "en" = brandContext.client?.default_locale === "en" ? "en" : "pt";
   const strategyForAI = {
-    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders),
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
     client: brandContext.client ?? undefined,
     editorial_profile: brandContext.editorial_profile ?? undefined,
     business_tags: brandContext.business_tags,
+    reference_examples: referenceExamples.length > 0 ? referenceExamples : undefined,
   };
 
   const persona: PersonaRowForAI | null = draft.persona_id
@@ -1682,6 +2189,12 @@ export async function retryScheduleItem(
       )
     : null;
 
+  const validFormats = ["post", "reel", "story", "carousel", "short", "video", "thread"] as const;
+  type ValidFormat = typeof validFormats[number];
+  const newFormat = options?.newFormat && validFormats.includes(options.newFormat as ValidFormat)
+    ? (options.newFormat as ValidFormat)
+    : undefined;
+
   const next = await regenerateScheduleItemWithOpenAI({
     locale: aiLocale,
     timezone: String(draft.timezone || brandContext.client?.timezone || "Europe/Lisbon"),
@@ -1692,6 +2205,8 @@ export async function retryScheduleItem(
     format: normalizeFormat(item.format) ?? "post",
     previousTitle: item.title,
     previousCaption: item.caption,
+    userFeedback: options?.userFeedback || undefined,
+    newFormat,
   });
 
   const { data: updated, error: updateError } = await supabase
@@ -1701,6 +2216,7 @@ export async function retryScheduleItem(
       caption: next.caption,
       assets: next.assets,
       rationale: next.rationale,
+      format: next.format,
       status: "suggested",
       retry_count: (item.retry_count ?? 0) + 1,
     })
@@ -1840,12 +2356,19 @@ export async function generateScheduleItemAssets(
         (
           await supabase
             .from("client_competitors")
-            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
             .eq("client_id", clientId)
             .in("id", competitorIds)
         ).data ?? []
       ) as CompetitorRowForAI[]
     : [];
+
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
 
   const referenceGroupIds = strategy.reference_group_ids;
   const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
@@ -1863,7 +2386,7 @@ export async function generateScheduleItemAssets(
   const brandContext = await fetchClientContextForAI(supabase, clientId);
   const aiLocale: "pt" | "en" = brandContext.client?.default_locale === "en" ? "en" : "pt";
   const strategyForAI = {
-    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders),
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
     client: brandContext.client ?? undefined,
     editorial_profile: brandContext.editorial_profile ?? undefined,
     business_tags: brandContext.business_tags,
@@ -1961,12 +2484,19 @@ export async function generateScheduleItemAssetImage(
         (
           await supabase
             .from("client_competitors")
-            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
             .eq("client_id", clientId)
             .in("id", competitorIds)
         ).data ?? []
       ) as CompetitorRowForAI[]
     : [];
+
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
 
   const referenceGroupIds = strategy.reference_group_ids;
   const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
@@ -1984,7 +2514,7 @@ export async function generateScheduleItemAssetImage(
   const brandContext = await fetchClientContextForAI(supabase, clientId);
   const aiLocale: "pt" | "en" = brandContext.client?.default_locale === "en" ? "en" : "pt";
   const strategyForAI = {
-    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders),
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
     client: brandContext.client ?? undefined,
     editorial_profile: brandContext.editorial_profile ?? undefined,
     business_tags: brandContext.business_tags,
@@ -2240,12 +2770,19 @@ export async function createScheduleItemWithAI(
         (
           await supabase
             .from("client_competitors")
-            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
             .eq("client_id", clientId)
             .in("id", competitorIds)
         ).data ?? []
       ) as CompetitorRowForAI[]
     : [];
+
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
 
   const referenceGroupIds = strategy.reference_group_ids;
   const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
@@ -2287,7 +2824,7 @@ export async function createScheduleItemWithAI(
     : null;
 
   const strategyForAI = {
-    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders),
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
     client: brandContext.client ?? undefined,
     editorial_profile: brandContext.editorial_profile ?? undefined,
     business_tags: brandContext.business_tags,
@@ -2430,12 +2967,19 @@ export async function regenerateScheduleItemText(
         (
           await supabase
             .from("client_competitors")
-            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
             .eq("client_id", clientId)
             .in("id", competitorIds)
         ).data ?? []
       ) as CompetitorRowForAI[]
     : [];
+
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
 
   const referenceGroupIds = strategy.reference_group_ids;
   const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
@@ -2453,7 +2997,7 @@ export async function regenerateScheduleItemText(
   const brandContext = await fetchClientContextForAI(supabase, clientId);
   const aiLocale: "pt" | "en" = brandContext.client?.default_locale === "en" ? "en" : "pt";
   const strategyForAI = {
-    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders),
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
     client: brandContext.client ?? undefined,
     editorial_profile: brandContext.editorial_profile ?? undefined,
     business_tags: brandContext.business_tags,
@@ -2541,12 +3085,19 @@ export async function previewRegenerateScheduleItemText(
         (
           await supabase
             .from("client_competitors")
-            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x")
+            .select("id, name, website, instagram, tiktok, facebook, youtube, linkedin, x, ai_profile")
             .eq("client_id", clientId)
             .in("id", competitorIds)
         ).data ?? []
       ) as CompetitorRowForAI[]
     : [];
+
+  const competitorInsights = competitorDetails.length > 0
+    ? extractCompetitorInsights(competitorDetails.map((c) => ({
+        name: c.name,
+        ai_profile: (c as any).ai_profile,
+      })))
+    : null;
 
   const referenceGroupIds = strategy.reference_group_ids;
   const referenceFolders: ReferenceGroupRowForAI[] = referenceGroupIds?.length
@@ -2564,7 +3115,7 @@ export async function previewRegenerateScheduleItemText(
   const brandContext = await fetchClientContextForAI(supabase, clientId);
   const aiLocale: "pt" | "en" = brandContext.client?.default_locale === "en" ? "en" : "pt";
   const strategyForAI = {
-    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders),
+    ...buildStrategyForAI(strategy, competitorDetails, referenceFolders, competitorInsights),
     client: brandContext.client ?? undefined,
     editorial_profile: brandContext.editorial_profile ?? undefined,
     business_tags: brandContext.business_tags,
@@ -2971,4 +3522,505 @@ export async function updateClientProfile(
 
   revalidatePath(`/dashboard/clients/${clientId}`);
   return { success: t.profileUpdated };
+}
+
+// ---------------------------------------------------------------------------
+// Media Library
+// ---------------------------------------------------------------------------
+
+export type MediaAsset = {
+  id: string;
+  client_id: string;
+  name: string;
+  description: string | null;
+  file_url: string;
+  thumbnail_url: string | null;
+  file_type: "image" | "video" | "gif";
+  mime_type: string;
+  file_size: number | null;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  tags: string[];
+  folder: string;
+  used_in_posts: number;
+  created_at: string;
+};
+
+export async function getMediaAssets(
+  clientId: string
+): Promise<{ error?: string; assets?: MediaAsset[] }> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("client_media_assets")
+    .select(
+      "id, client_id, name, description, file_url, thumbnail_url, file_type, mime_type, file_size, width, height, duration_ms, tags, folder, used_in_posts, created_at"
+    )
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false });
+  if (error) return { error: error.message };
+  return { assets: (data ?? []) as MediaAsset[] };
+}
+
+export async function saveMediaAsset(
+  clientId: string,
+  locale: ActionLocale,
+  payload: {
+    name: string;
+    fileUrl: string;
+    fileType: "image" | "video" | "gif";
+    mimeType: string;
+    fileSize?: number | null;
+    width?: number | null;
+    height?: number | null;
+    durationMs?: number | null;
+    folder?: string;
+    tags?: string[];
+  }
+): Promise<{ error?: string; asset?: MediaAsset }> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: ACTION_COPY[locale].sessionExpired };
+
+  const { data, error } = await supabase
+    .from("client_media_assets")
+    .insert({
+      client_id: clientId,
+      owner_id: user.id,
+      name: payload.name,
+      file_url: payload.fileUrl,
+      file_type: payload.fileType,
+      mime_type: payload.mimeType,
+      file_size: payload.fileSize ?? null,
+      width: payload.width ?? null,
+      height: payload.height ?? null,
+      duration_ms: payload.durationMs ?? null,
+      folder: payload.folder || "general",
+      tags: payload.tags ?? [],
+    })
+    .select(
+      "id, client_id, name, description, file_url, thumbnail_url, file_type, mime_type, file_size, width, height, duration_ms, tags, folder, used_in_posts, created_at"
+    )
+    .single();
+
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/clients/${clientId}/media`);
+  return { asset: data as MediaAsset };
+}
+
+export async function deleteMediaAsset(
+  assetId: string,
+  clientId: string,
+  locale: ActionLocale
+): Promise<{ error?: string; success?: string }> {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("client_media_assets")
+    .delete()
+    .eq("id", assetId)
+    .eq("client_id", clientId);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/clients/${clientId}/media`);
+  return { success: locale === "pt" ? "Ativo eliminado." : "Asset deleted." };
+}
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+export type PostAnalytics = {
+  id: string;
+  schedule_item_id: string;
+  impressions: number | null;
+  reach: number | null;
+  engagement: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  video_views: number | null;
+  fetched_at: string;
+};
+
+export async function fetchPostAnalyticsOnDemand(
+  itemId: string,
+  clientId: string,
+  locale: ActionLocale
+): Promise<{ error?: string; analytics?: PostAnalytics }> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: ACTION_COPY[locale].sessionExpired };
+
+  // Get the post with its external_id, platform, social_account_id
+  const { data: post, error: postErr } = await supabase
+    .from("client_schedule_items")
+    .select("id, platform, external_id, social_account_id, status")
+    .eq("id", itemId)
+    .eq("client_id", clientId)
+    .single();
+  if (postErr || !post) return { error: locale === "pt" ? "Post não encontrado." : "Post not found." };
+  if (post.status !== "published") return { error: locale === "pt" ? "Post ainda não publicado." : "Post not published yet." };
+  if (!post.external_id) return { error: locale === "pt" ? "Sem ID externo." : "No external ID." };
+
+  const { data: account } = await supabase
+    .from("client_social_accounts")
+    .select("*")
+    .eq("id", post.social_account_id)
+    .single();
+  if (!account) return { error: locale === "pt" ? "Conta social não encontrada." : "Social account not found." };
+
+  try {
+    // Dynamic imports to avoid bundling server-side platform clients
+    const platform = String(post.platform).toLowerCase();
+    let insights: Record<string, number> = {};
+
+    if (platform === "instagram" || platform === "facebook") {
+      const { getValidAccessToken, getMediaInsights } = await import("@/lib/social/meta-client");
+      const token = await getValidAccessToken(account);
+      insights = await getMediaInsights(token, post.external_id);
+    } else if (platform === "tiktok") {
+      const { getValidAccessToken, getVideoInsights } = await import("@/lib/social/tiktok-client");
+      const token = await getValidAccessToken(account);
+      insights = await getVideoInsights(token, post.external_id);
+    } else {
+      return { error: locale === "pt" ? "Plataforma não suportada." : "Platform not supported." };
+    }
+
+    const { data: upserted, error: upsertErr } = await supabase
+      .from("post_analytics")
+      .upsert(
+        {
+          schedule_item_id: itemId,
+          client_id: clientId,
+          owner_id: user.id,
+          impressions: insights.impressions ?? null,
+          reach: insights.reach ?? null,
+          engagement: insights.engagement ?? null,
+          likes: insights.likes ?? null,
+          comments: insights.comments ?? null,
+          shares: insights.shares ?? null,
+          saves: insights.saves ?? null,
+          video_views: insights.video_views ?? null,
+          fetched_at: new Date().toISOString(),
+        },
+        { onConflict: "schedule_item_id" }
+      )
+      .select("id, schedule_item_id, impressions, reach, engagement, likes, comments, shares, saves, video_views, fetched_at")
+      .single();
+
+    if (upsertErr) return { error: upsertErr.message };
+    return { analytics: upserted as PostAnalytics };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to fetch analytics." };
+  }
+}
+
+export async function getPostAnalytics(
+  itemId: string,
+  clientId: string
+): Promise<{ error?: string; analytics?: PostAnalytics }> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("post_analytics")
+    .select("id, schedule_item_id, impressions, reach, engagement, likes, comments, shares, saves, video_views, fetched_at")
+    .eq("schedule_item_id", itemId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  return { analytics: data as PostAnalytics | undefined };
+}
+
+export async function updateMediaAssetName(
+  assetId: string,
+  clientId: string,
+  name: string,
+  locale: ActionLocale
+): Promise<{ error?: string; success?: string }> {
+  if (!name.trim()) return { error: locale === "pt" ? "Nome obrigatório." : "Name is required." };
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("client_media_assets")
+    .update({ name: name.trim() })
+    .eq("id", assetId)
+    .eq("client_id", clientId);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/clients/${clientId}/media`);
+  return { success: locale === "pt" ? "Nome atualizado." : "Name updated." };
+}
+
+// ---------------------------------------------------------------------------
+// Ad Campaigns / Boosting
+// ---------------------------------------------------------------------------
+
+export type AdCampaign = {
+  id: string;
+  name: string;
+  status: string;
+  platform: string;
+  campaign_type: string;
+  daily_budget_cents: number | null;
+  total_budget_cents: number | null;
+  currency: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  results: Record<string, unknown>;
+  created_at: string;
+};
+
+export async function getAdCampaigns(
+  clientId: string
+): Promise<{ error?: string; campaigns?: AdCampaign[] }> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("ad_campaigns")
+    .select("id, name, status, platform, campaign_type, daily_budget_cents, total_budget_cents, currency, start_date, end_date, results, created_at")
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false });
+  if (error) return { error: error.message };
+  return { campaigns: (data ?? []) as AdCampaign[] };
+}
+
+export async function boostPost(
+  itemId: string,
+  clientId: string,
+  locale: ActionLocale,
+  params: {
+    name: string;
+    dailyBudgetCents: number;
+    startDate: string;
+    endDate: string;
+    currency?: string;
+    targeting?: Record<string, unknown>;
+  }
+): Promise<{ error?: string; success?: string; campaign?: AdCampaign }> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: ACTION_COPY[locale].sessionExpired };
+
+  const { data: post, error: postErr } = await supabase
+    .from("client_schedule_items")
+    .select("id, platform, external_id, social_account_id, status, title")
+    .eq("id", itemId)
+    .eq("client_id", clientId)
+    .single();
+  if (postErr || !post) return { error: locale === "pt" ? "Post não encontrado." : "Post not found." };
+  if (post.status !== "published") return { error: locale === "pt" ? "Só é possível fazer boost de posts publicados." : "Can only boost published posts." };
+  if (!post.external_id) return { error: locale === "pt" ? "Sem ID externo para boost." : "No external ID for boost." };
+
+  // For now, create the campaign record without actually calling Meta API
+  // (Meta Ads API requires app review for ads_management scope)
+  const { data: campaign, error: insertErr } = await supabase
+    .from("ad_campaigns")
+    .insert({
+      client_id: clientId,
+      owner_id: user.id,
+      schedule_item_id: itemId,
+      social_account_id: post.social_account_id,
+      platform: post.platform,
+      campaign_type: "boost",
+      status: "pending",
+      name: params.name,
+      daily_budget_cents: params.dailyBudgetCents,
+      currency: params.currency ?? "USD",
+      start_date: params.startDate,
+      end_date: params.endDate,
+      targeting: params.targeting ?? {},
+    })
+    .select("id, name, status, platform, campaign_type, daily_budget_cents, total_budget_cents, currency, start_date, end_date, results, created_at")
+    .single();
+
+  if (insertErr) return { error: insertErr.message };
+
+  await supabase.from("activity_logs").insert({
+    client_id: clientId,
+    owner_id: user.id,
+    action: "boost_created",
+    entity_type: "schedule_item",
+    entity_id: itemId,
+    details: { platform: post.platform, campaign_name: params.name },
+  });
+
+  revalidatePath(`/dashboard/clients/${clientId}/budget`);
+  return {
+    success: locale === "pt" ? "Boost criado com sucesso." : "Boost campaign created.",
+    campaign: campaign as AdCampaign,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Saved Audiences
+// ---------------------------------------------------------------------------
+
+export type SavedAudience = {
+  id: string;
+  name: string;
+  description: string | null;
+  platform: string;
+  targeting: Record<string, unknown>;
+  estimated_reach: Record<string, unknown> | null;
+  used_in_campaigns: number;
+  created_at: string;
+};
+
+export async function getSavedAudiences(
+  clientId: string
+): Promise<{ error?: string; audiences?: SavedAudience[] }> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("saved_audiences")
+    .select("id, name, description, platform, targeting, estimated_reach, used_in_campaigns, created_at")
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false });
+  if (error) return { error: error.message };
+  return { audiences: (data ?? []) as SavedAudience[] };
+}
+
+export async function createSavedAudience(
+  clientId: string,
+  locale: ActionLocale,
+  payload: { name: string; description?: string; platform: string; targeting: Record<string, unknown> }
+): Promise<{ error?: string; audience?: SavedAudience }> {
+  if (!payload.name.trim()) return { error: locale === "pt" ? "Nome obrigatório." : "Name is required." };
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: ACTION_COPY[locale].sessionExpired };
+
+  const { data, error } = await supabase
+    .from("saved_audiences")
+    .insert({
+      client_id: clientId,
+      owner_id: user.id,
+      name: payload.name.trim(),
+      description: payload.description?.trim() || null,
+      platform: payload.platform,
+      targeting: payload.targeting,
+    })
+    .select("id, name, description, platform, targeting, estimated_reach, used_in_campaigns, created_at")
+    .single();
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/clients/${clientId}/audiences`);
+  return { audience: data as SavedAudience };
+}
+
+export async function deleteSavedAudience(
+  audienceId: string,
+  clientId: string,
+  locale: ActionLocale
+): Promise<{ error?: string; success?: string }> {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("saved_audiences")
+    .delete()
+    .eq("id", audienceId)
+    .eq("client_id", clientId);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/clients/${clientId}/audiences`);
+  return { success: locale === "pt" ? "Audiência eliminada." : "Audience deleted." };
+}
+
+// ---------------------------------------------------------------------------
+// AI Suggestions
+// ---------------------------------------------------------------------------
+
+export type AISuggestion = {
+  type: "format" | "timing" | "competitor" | "trending" | "general";
+  title: string;
+  body: string;
+  action?: string;
+  actionUrl?: string;
+};
+
+export async function generateSuggestions(
+  clientId: string,
+  locale: ActionLocale
+): Promise<{ error?: string; suggestions?: AISuggestion[] }> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: ACTION_COPY[locale].sessionExpired };
+
+  const brandContext = await fetchClientContextForAI(supabase, clientId);
+
+  // Gather context: recent posts, competitors
+  const { data: recentPosts } = await supabase
+    .from("client_schedule_items")
+    .select("platform, format, status")
+    .eq("client_id", clientId)
+    .in("status", ["published", "accepted", "scheduled"])
+    .order("scheduled_at", { ascending: false })
+    .limit(50);
+
+  const { data: competitors } = await supabase
+    .from("client_competitors")
+    .select("name, niche")
+    .eq("client_id", clientId)
+    .limit(5);
+
+  const { data: analytics } = await supabase
+    .from("post_analytics")
+    .select("impressions, reach, engagement, likes, video_views")
+    .eq("client_id", clientId)
+    .limit(20);
+
+  const postSummary = recentPosts
+    ? Object.entries(
+        recentPosts.reduce((acc, p) => {
+          const key = `${p.platform}/${p.format}`;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>)
+      )
+        .map(([k, v]) => `${k}: ${v} posts`)
+        .join(", ")
+    : "no posts";
+
+  const avgEngagement = analytics && analytics.length > 0
+    ? Math.round(analytics.reduce((s, a) => s + (a.engagement || 0), 0) / analytics.length)
+    : 0;
+
+  const { getOpenAIClient, getOpenAIModel } = await import("@/lib/ai/openai");
+  const openai = getOpenAIClient();
+  const model = getOpenAIModel();
+
+  const prompt = `You are a social media strategy expert advising an agency about their client "${brandContext.client?.name || "the client"}".
+
+Client niche: ${brandContext.editorial_profile?.audience || "not specified"}
+Recent post distribution: ${postSummary}
+Average engagement: ${avgEngagement}
+Competitors: ${competitors?.map((c) => c.name).join(", ") || "none"}
+Language for suggestions: ${locale === "pt" ? "Portuguese" : "English"}
+
+Generate 4-6 actionable suggestions to improve their social media performance. Each suggestion must be concise and specific.
+Return a JSON array with objects: { "type": "format"|"timing"|"competitor"|"trending"|"general", "title": "...", "body": "...", "action": "optional CTA label" }
+Only return the JSON array, no markdown.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+      temperature: 0.7,
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw);
+    const suggestions: AISuggestion[] = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.suggestions)
+        ? parsed.suggestions
+        : [];
+
+    return { suggestions };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to generate suggestions." };
+  }
 }

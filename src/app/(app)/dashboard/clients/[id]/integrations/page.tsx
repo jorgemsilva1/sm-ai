@@ -31,7 +31,7 @@ export default async function ClientIntegrationsPage({
 
   const { data: accounts } = await supabase
     .from("client_social_accounts")
-    .select("id, provider, provider_account_id, username, display_name, avatar_url, profile_url, scopes, expires_at, created_at")
+    .select("id, provider, provider_account_id, username, display_name, avatar_url, profile_url, scopes, expires_at, token_status, created_at")
     .eq("client_id", client.id)
     .order("created_at", { ascending: false });
 

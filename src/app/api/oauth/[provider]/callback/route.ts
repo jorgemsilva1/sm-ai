@@ -16,7 +16,7 @@ function tokenConfig(provider: Provider) {
     case "instagram":
     case "facebook":
       return {
-        tokenUrl: "https://graph.facebook.com/v19.0/oauth/access_token",
+        tokenUrl: "https://graph.facebook.com/v25.0/oauth/access_token",
         clientId: process.env.META_APP_ID || "",
         clientSecret: process.env.META_APP_SECRET || "",
       };
@@ -49,9 +49,26 @@ function tokenConfig(provider: Provider) {
 
 async function fetchProfile(provider: Provider, accessToken: string) {
   try {
-    if (provider === "instagram" || provider === "facebook") {
+    if (provider === "instagram") {
+      // Fetch pages with linked Instagram Business Accounts
       const res = await fetch(
-        `https://graph.facebook.com/me?fields=id,name&access_token=${encodeURIComponent(accessToken)}`,
+        `https://graph.facebook.com/v25.0/me/accounts?fields=id,name,access_token,instagram_business_account&access_token=${encodeURIComponent(accessToken)}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) return null;
+      const json = await res.json() as { data?: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id: string } }> };
+      const page = json.data?.[0];
+      if (!page?.instagram_business_account?.id) return null;
+      return {
+        provider_account_id: page.instagram_business_account.id,
+        display_name: page.name ?? null,
+        _page_id: page.id,
+        _page_access_token: page.access_token,
+      };
+    }
+    if (provider === "facebook") {
+      const res = await fetch(
+        `https://graph.facebook.com/v25.0/me?fields=id,name&access_token=${encodeURIComponent(accessToken)}`,
         { cache: "no-store" }
       );
       if (!res.ok) return null;
@@ -250,20 +267,77 @@ export async function GET(
 
   const profile = await fetchProfile(provider, accessToken);
 
+  // For Meta providers: exchange short-lived token for long-lived (60 days)
+  let finalAccessToken = accessToken;
+  let finalExpiresAt = expiresAt;
+  let pageAccessToken: string | null = null;
+  let pageId: string | null = null;
+  let refreshExpiresAt: string | null = null;
+
+  if (provider === "instagram" || provider === "facebook") {
+    try {
+      const appId = process.env.META_APP_ID || "";
+      const appSecret = process.env.META_APP_SECRET || "";
+      const llUrl = `https://graph.facebook.com/v25.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(accessToken)}`;
+      const llRes = await fetch(llUrl, { cache: "no-store" });
+      const llJson = await llRes.json();
+      if (llRes.ok && llJson.access_token) {
+        finalAccessToken = llJson.access_token;
+        finalExpiresAt = llJson.expires_in
+          ? new Date(Date.now() + llJson.expires_in * 1000).toISOString()
+          : new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
+      }
+    } catch {
+      // Keep short-lived token if exchange fails
+    }
+
+    // For Instagram: page data is already in profile (fetched during fetchProfile)
+    if (provider === "instagram" && profile) {
+      const p = profile as { _page_id?: string; _page_access_token?: string };
+      if (p._page_id) pageId = p._page_id;
+      if (p._page_access_token) pageAccessToken = p._page_access_token;
+    }
+
+    // For Facebook: fetch Page Access Token (never expires)
+    if (provider === "facebook" && profile?.provider_account_id) {
+      try {
+        const pageUrl = `https://graph.facebook.com/v25.0/${profile.provider_account_id}/accounts?access_token=${encodeURIComponent(finalAccessToken)}`;
+        const pageRes = await fetch(pageUrl, { cache: "no-store" });
+        const pageJson = await pageRes.json();
+        if (pageRes.ok && pageJson.data?.[0]) {
+          pageId = pageJson.data[0].id;
+          pageAccessToken = pageJson.data[0].access_token;
+        }
+      } catch {
+        // Page token fetch is best-effort
+      }
+    }
+  }
+
+  // For TikTok: store refresh_expires_at (refresh tokens expire in 365 days)
+  if (provider === "tiktok") {
+    const tiktokRefreshExpiry = tokenJson.refresh_expires_in ?? 31536000; // 365 days default
+    refreshExpiresAt = new Date(Date.now() + tiktokRefreshExpiry * 1000).toISOString();
+  }
+
   await supabase.from("client_social_accounts").upsert({
     client_id: row.client_id,
     owner_id: user.id,
     provider,
     provider_account_id: profile?.provider_account_id ?? null,
-    username: profile?.username ?? null,
+    username: (profile as Record<string, unknown> | null)?.username as string | null ?? null,
     display_name: profile?.display_name ?? null,
-    avatar_url: profile?.avatar_url ?? null,
+    avatar_url: (profile as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
     scopes,
-    access_token: accessToken || null,
+    access_token: finalAccessToken || null,
     refresh_token: refreshToken,
-    expires_at: expiresAt,
+    expires_at: finalExpiresAt,
+    refresh_expires_at: refreshExpiresAt,
+    page_access_token: pageAccessToken,
+    page_id: pageId,
     token_type: tokenType,
-    metadata: (profile as any)?.metadata ?? {},
+    token_status: "active",
+    metadata: (profile as Record<string, unknown> | null)?.metadata ?? {},
   });
 
   await supabase.from("client_oauth_states").delete().eq("id", row.id);

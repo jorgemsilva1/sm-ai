@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { Button } from "@/components/ui/button";
 import { cookies } from "next/headers";
 import { copy, getLocale } from "@/lib/i18n";
+import { ClientMediaLibrary } from "@/components/clients/client-media-library";
+import { getMediaAssets } from "@/app/(app)/dashboard/clients/actions";
 
 type ClientMediaPageProps = {
   params: Promise<{ id: string }>;
@@ -26,28 +26,16 @@ export default async function ClientMediaPage({ params }: ClientMediaPageProps) 
     notFound();
   }
 
+  const { assets = [] } = await getMediaAssets(id);
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-semibold">{client.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t.clients.sections.mediaSubtitle}
-          </p>
-        </div>
-        <Button asChild variant="ghost">
-          <Link href="/dashboard/clients">
-            {t.common.backToClients}
-          </Link>
-        </Button>
+      <div>
+        <h1 className="text-3xl font-semibold">{t.clients.sections.mediaTitle}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t.clients.sections.mediaSubtitle}</p>
       </div>
 
-      <section className="border-b border-border/40 pb-6">
-        <h2 className="text-lg font-semibold">{t.clients.sections.mediaTitle}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {t.clients.sections.mediaBody}
-        </p>
-      </section>
+      <ClientMediaLibrary clientId={id} initialAssets={assets} />
     </div>
   );
 }
