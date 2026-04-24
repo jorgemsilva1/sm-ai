@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { DayPicker } from "react-day-picker";
 import { format } from "date-fns";
-import pt from "date-fns/locale/pt";
-import enUS from "date-fns/locale/en-US";
+import { pt } from "date-fns/locale/pt";
+import { enUS } from "date-fns/locale/en-US";
 import { CalendarDays, Loader2, Minus, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

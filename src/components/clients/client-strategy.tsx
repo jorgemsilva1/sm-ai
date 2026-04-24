@@ -95,7 +95,7 @@ function parseList(value?: string | null) {
     .filter(Boolean);
 }
 
-function splitKnownUnknown(values: string[], knownOptions: string[]) {
+function splitKnownUnknown(values: string[], knownOptions: readonly string[]) {
   const known = new Set(knownOptions);
   const selected: string[] = [];
   const unknown: string[] = [];
@@ -299,16 +299,16 @@ export function ClientStrategyCreate({
       const template = strategyTemplates.find((item) => item.id === initialTemplateId);
       if (template) {
         base.title = initialTitle || template.title;
-        base.objectives = template.objectives ?? [];
-        base.content_pillars = template.contentPillars ?? [];
-        base.formats = template.formats ?? [];
-        base.channels = template.channels ?? [];
-        base.kpis = template.kpis ?? [];
-        base.cadence = template.cadence && strategyOptions.cadence.includes(template.cadence)
+        base.objectives = [...(template.objectives ?? [])];
+        base.content_pillars = [...(template.contentPillars ?? [])];
+        base.formats = [...(template.formats ?? [])];
+        base.channels = [...(template.channels ?? [])];
+        base.kpis = [...(template.kpis ?? [])];
+        base.cadence = template.cadence && (strategyOptions.cadence as readonly string[]).includes(template.cadence)
           ? template.cadence
           : "";
         base.cadence_other =
-          template.cadence && !strategyOptions.cadence.includes(template.cadence)
+          template.cadence && !(strategyOptions.cadence as readonly string[]).includes(template.cadence)
             ? template.cadence
             : "";
         base.positioning = template.positioning ?? "";
@@ -1149,9 +1149,9 @@ export function ClientStrategyEditor({
     base.kpis_other = kpis.other;
 
     const cadenceRaw = (strategy.cadence ?? "").trim();
-    base.cadence = cadenceRaw && strategyOptions.cadence.includes(cadenceRaw) ? cadenceRaw : "";
+    base.cadence = cadenceRaw && (strategyOptions.cadence as readonly string[]).includes(cadenceRaw) ? cadenceRaw : "";
     base.cadence_other =
-      cadenceRaw && !strategyOptions.cadence.includes(cadenceRaw) ? cadenceRaw : "";
+      cadenceRaw && !(strategyOptions.cadence as readonly string[]).includes(cadenceRaw) ? cadenceRaw : "";
 
     return base;
   }, [emptyEdit, strategy, strategyOptions]);
@@ -1640,13 +1640,13 @@ export function ClientStrategyEditor({
                   <Label
                     htmlFor={`format-${strategy.id}-${option}`}
                     className={`cursor-pointer rounded-full border border-border/60 px-3 py-1 text-sm peer-checked:border-brand/60 peer-checked:bg-brand/10 ${
-                      clientType === "content_creator" && (option === "reel" || option === "short" || option === "story")
+                      clientType === "content_creator" && ((option as string) === "reel" || (option as string) === "short" || (option as string) === "story")
                         ? "ring-2 ring-brand/40"
                         : ""
                     }`}
                   >
                     {option}
-                    {clientType === "content_creator" && (option === "reel" || option === "short" || option === "story") ? (
+                    {clientType === "content_creator" && ((option as string) === "reel" || (option as string) === "short" || (option as string) === "story") ? (
                       <span className="ml-1 text-xs text-brand">★</span>
                     ) : null}
                   </Label>

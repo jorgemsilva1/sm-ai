@@ -461,7 +461,7 @@ export function ClientCreateWizard({ locale, onClose }: ClientCreateWizardProps)
           type="button"
           variant="outline"
           onClick={step === 1 ? onClose : handleBack}
-          disabled={state?.success}
+          disabled={!!state?.success}
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
           {step === 1
@@ -474,7 +474,7 @@ export function ClientCreateWizard({ locale, onClose }: ClientCreateWizardProps)
           <Button
             type="button"
             onClick={handleNext}
-            disabled={!canProceed || state?.success}
+            disabled={!canProceed || !!state?.success}
             variant="brand"
           >
             {locale === "pt" ? "Seguinte" : "Next"}
@@ -484,7 +484,7 @@ export function ClientCreateWizard({ locale, onClose }: ClientCreateWizardProps)
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={!canProceed || isSubmitting || state?.success}
+            disabled={!canProceed || isSubmitting || !!state?.success}
             variant="brand"
           >
             {isSubmitting || state?.success

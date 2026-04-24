@@ -118,7 +118,6 @@ export function ClientSettingsForm({
 
   const timeZoneOptions = (() => {
     try {
-      // @ts-expect-error Intl.supportedValuesOf exists in modern runtimes
       const tzs: string[] = Intl.supportedValuesOf("timeZone");
       const now = new Date();
       const offsets = new Map<string, true>();

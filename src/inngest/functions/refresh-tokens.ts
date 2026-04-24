@@ -5,8 +5,7 @@ import { refreshAccessToken as refreshTikTokToken } from "@/lib/social/tiktok-cl
 
 // Runs daily at 3am, refreshes Meta tokens expiring within 10 days
 export const refreshMetaTokens = inngest.createFunction(
-  { id: "refresh-meta-tokens" },
-  { cron: "0 3 * * *" },
+  { id: "refresh-meta-tokens", triggers: [{ cron: "0 3 * * *" }] },
   async ({ step }) => {
     const accounts = await step.run("find-expiring-meta-accounts", async () => {
       const supabase = createAdminClient();
@@ -70,8 +69,7 @@ export const refreshMetaTokens = inngest.createFunction(
 
 // Runs every 12 hours, refreshes TikTok tokens expiring within 6 hours
 export const refreshTikTokTokens = inngest.createFunction(
-  { id: "refresh-tiktok-tokens" },
-  { cron: "0 */12 * * *" },
+  { id: "refresh-tiktok-tokens", triggers: [{ cron: "0 */12 * * *" }] },
   async ({ step }) => {
     const accounts = await step.run("find-expiring-tiktok-accounts", async () => {
       const supabase = createAdminClient();

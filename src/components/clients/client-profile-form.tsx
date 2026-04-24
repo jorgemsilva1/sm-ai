@@ -70,10 +70,9 @@ export function ClientProfileForm({
           <div className="space-y-2 md:col-span-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="brand_values">{t.clients.profile.brandValues}</Label>
-              <Info
-                className="h-4 w-4 text-muted-foreground"
-                title={t.clients.profile.tooltips.brandValues}
-              />
+              <span title={t.clients.profile.tooltips.brandValues}>
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </span>
             </div>
             <Textarea
               id="brand_values"
@@ -85,10 +84,9 @@ export function ClientProfileForm({
           <div className="space-y-2 md:col-span-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="tone">{t.clients.profile.tone}</Label>
-              <Info
-                className="h-4 w-4 text-muted-foreground"
-                title={t.clients.profile.tooltips.tone}
-              />
+              <span title={t.clients.profile.tooltips.tone}>
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </span>
             </div>
             <input type="hidden" name="tone" value={toneValue} />
             <DropdownMenu>
@@ -127,10 +125,9 @@ export function ClientProfileForm({
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="goals">{t.clients.profile.goals}</Label>
-              <Info
-                className="h-4 w-4 text-muted-foreground"
-                title={t.clients.profile.tooltips.goals}
-              />
+              <span title={t.clients.profile.tooltips.goals}>
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </span>
             </div>
             <Textarea
               id="goals"
@@ -142,10 +139,9 @@ export function ClientProfileForm({
           <div className="space-y-2 md:col-span-2">
             <div className="flex items-center gap-2">
               <Label htmlFor="references">{t.clients.profile.references}</Label>
-              <Info
-                className="h-4 w-4 text-muted-foreground"
-                title={t.clients.profile.tooltips.references}
-              />
+              <span title={t.clients.profile.tooltips.references}>
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </span>
             </div>
             <Textarea
               id="references"

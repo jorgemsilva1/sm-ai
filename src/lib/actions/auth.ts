@@ -31,8 +31,8 @@ function getActionLocale(formData: FormData): ActionLocale {
   return locale === "pt" ? "pt" : "en";
 }
 
-function getOrigin() {
-  const headerList = headers();
+async function getOrigin() {
+  const headerList = await headers();
   return headerList.get("origin") ?? "http://localhost:3000";
 }
 

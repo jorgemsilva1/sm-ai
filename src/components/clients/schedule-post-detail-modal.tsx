@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { format } from "date-fns";
-import pt from "date-fns/locale/pt";
-import enUS from "date-fns/locale/en-US";
+import { pt } from "date-fns/locale/pt";
+import { enUS } from "date-fns/locale/en-US";
 import { Button } from "@/components/ui/button";
 import { copy, type Locale } from "@/lib/i18n";
 

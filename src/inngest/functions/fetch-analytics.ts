@@ -5,8 +5,7 @@ import { getValidAccessToken as getTikTokToken, getVideoInsights } from "@/lib/s
 import type { SocialAccountRow } from "@/lib/social/types";
 
 export const fetchPostAnalytics = inngest.createFunction(
-  { id: "fetch-post-analytics", concurrency: { limit: 1 } },
-  { cron: "0 */6 * * *" },
+  { id: "fetch-post-analytics", concurrency: { limit: 1 }, triggers: [{ cron: "0 */6 * * *" }] },
   async () => {
     const supabase = createAdminClient();
 

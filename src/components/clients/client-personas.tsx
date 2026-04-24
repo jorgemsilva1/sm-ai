@@ -19,8 +19,9 @@ import { copy, Locale } from "@/lib/i18n";
 import { Info } from "lucide-react";
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   interface Window {
-    google?: typeof google;
+    google?: any;
   }
 }
 
@@ -704,7 +705,7 @@ function LocationInput({
 
   useEffect(() => {
     if (!GOOGLE_MAPS_KEY || !inputRef.current) return;
-    let autocomplete: google.maps.places.Autocomplete | null = null;
+    let autocomplete: any = null;
 
     const initAutocomplete = () => {
       if (!inputRef.current || !window.google?.maps?.places) return;

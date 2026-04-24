@@ -8,8 +8,7 @@ import type { SocialAccountRow, ScheduleItemForPublish } from "@/lib/social/type
 // Cron: runs every minute, fans out publish events for due posts.
 // This avoids Inngest's 7-day sleep limit on the free tier.
 export const publishDuePosts = inngest.createFunction(
-  { id: "publish-due-posts" },
-  { cron: "* * * * *" },
+  { id: "publish-due-posts", triggers: [{ cron: "* * * * *" }] },
   async ({ step }) => {
     const posts = await step.run("find-due-posts", async () => {
       const supabase = createAdminClient();
@@ -63,8 +62,8 @@ export const publishScheduledPost = inngest.createFunction(
         details: { error: error.message, platform: event.data.event.data.platform },
       });
     },
+    triggers: [{ event: "post/publish.execute" }],
   },
-  { event: "post/publish.execute" },
   async ({ event, step }) => {
     const { postId, clientId, ownerId, platform, socialAccountId } = event.data;
 

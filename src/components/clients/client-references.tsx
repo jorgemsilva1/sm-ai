@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import React, { useActionState, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   createReferenceGroup,
   createReferenceItem,
@@ -67,7 +67,7 @@ type ClientReferencesProps = {
   comments: ReferenceItemComment[];
 };
 
-const TYPE_ICONS: Record<string, JSX.Element> = {
+const TYPE_ICONS: Record<string, React.JSX.Element> = {
   image: <Image className="h-4 w-4" />,
   video: <Video className="h-4 w-4" />,
   link: <Link2 className="h-4 w-4" />,
@@ -198,7 +198,7 @@ export function ClientReferences({
   const breadcrumbs = useMemo(() => {
     if (!currentFolderId) return [];
     const path: ReferenceGroup[] = [];
-    let node = groupMap[currentFolderId];
+    let node: ReferenceGroup | undefined = groupMap[currentFolderId];
     while (node) {
       path.unshift(node);
       node = node.parent_id ? groupMap[node.parent_id] : undefined;
@@ -1235,7 +1235,7 @@ function renderMoveTree({
 
   const buildPath = (id: string) => {
     const parts: string[] = [];
-    let node = groupMap[id];
+    let node: ReferenceGroup | undefined = groupMap[id];
     while (node) {
       parts.unshift(node.name);
       node = node.parent_id ? groupMap[node.parent_id] : undefined;

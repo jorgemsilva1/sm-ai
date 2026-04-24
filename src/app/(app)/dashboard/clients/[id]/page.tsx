@@ -44,7 +44,11 @@ export default async function ClientPage({ params }: ClientPageProps) {
 
   const selectedTags =
     tagData
-      ?.map((row) => row.business_tags?.slug)
+      ?.map((row) => {
+        const bt = row.business_tags;
+        if (Array.isArray(bt)) return bt[0]?.slug;
+        return (bt as { slug: string } | null)?.slug;
+      })
       .filter((slug): slug is string => Boolean(slug)) ?? [];
 
   const tagLabels = selectedTags

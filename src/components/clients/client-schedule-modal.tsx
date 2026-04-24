@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DayPicker } from "react-day-picker";
 import { format } from "date-fns";
-import pt from "date-fns/locale/pt";
-import enUS from "date-fns/locale/en-US";
+import { pt } from "date-fns/locale/pt";
+import { enUS } from "date-fns/locale/en-US";
 import { CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -339,13 +339,13 @@ export function ScheduleGeneratorModal({
     startTransition(async () => {
       const res = await acceptScheduleItem(postId, clientId, locale);
       if (res?.item) {
-        const nextStatus = res.item.status as SuggestedPost["status"];
+        const nextStatus = res.item.status as string;
         setPosts((prev) =>
           prev.map((p) =>
             p.id === postId
               ? {
                   ...p,
-                  status: nextStatus === "scheduled" ? "accepted" : nextStatus,
+                  status: (nextStatus === "scheduled" ? "accepted" : nextStatus) as SuggestedPost["status"],
                   title: res.item!.title,
                   caption: res.item!.caption,
                   assets: res.item!.assets as any,
